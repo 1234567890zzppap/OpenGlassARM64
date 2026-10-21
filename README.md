@@ -2,6 +2,8 @@
 
 # Experience the native Aero Glass interface on Windows 10+
 
+ARM64 Version Only Test in 23H2!!!!!!!!!
+
 OpenGlass restores the full glass effect to window frames, with control over blur, reflections, colorization, caption rendering, and theme integration.
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ALTaleX531/OpenGlass)
