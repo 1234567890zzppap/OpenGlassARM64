@@ -666,7 +666,10 @@
       ],
       "requirement": "required",
       "kind": "raw",
-      "type": "CTopLevelWindow_UpdateWindowVisuals_t"
+      "type": "CTopLevelWindow_UpdateWindowVisuals_t",
+      "platforms": [
+        "x64"
+      ]
     },
     {
       "name": "Symbol_CTopLevelWindow_CTopLevelWindow",
@@ -698,7 +701,10 @@
       ],
       "requirement": "required",
       "kind": "raw",
-      "type": "CTopLevelWindow_IsShadowNCAreaPart_t"
+      "type": "CTopLevelWindow_IsShadowNCAreaPart_t",
+      "platforms": [
+        "x64"
+      ]
     },
     {
       "name": "Symbol_SetMargin",
@@ -747,7 +753,30 @@
       ],
       "requirement": "required",
       "target": "&CWindowList::GetWindowListForDesktop",
-      "kind": "projected_function"
+      "kind": "projected_function",
+      "platforms": [
+        "x64"
+      ]
+    },
+    {
+      "name": "Symbol_CWindowList_DesktopWindowListMap_FindElement",
+      "id": "CWindowList::DesktopWindowListMap.FindElement",
+      "bindings": [
+        {
+          "symbol_names": [
+            "public: struct CWindowList::DESKTOP_WINDOWLIST_MAP_ENTRY * __ptr64 __cdecl CGenericTableMap<unsigned __int64,struct CWindowList::DESKTOP_WINDOWLIST_MAP_ENTRY>::FindElement(unsigned __int64) __ptr64"
+          ],
+          "min_inclusive": null,
+          "max_exclusive": null
+        }
+      ],
+      "kind": "raw",
+      "type": "DESKTOP_WINDOWLIST_MAP_ENTRY* (*)(DesktopWindowListMap*, ULONG_PTR)",
+      "requirement": "required",
+      "platforms": [
+        "arm64"
+      ],
+      "notes": "ARM64 uDWM exposes CWindowList::GetWindowListForDesktop only as inlined copies; this desktop-map lookup is the equivalent entry point. Verified on 22631 ARM64 from CWindowList::StyleChange: the map sits at CWindowList+sizeof(PVOID) and the list head at entry+10*sizeof(PVOID)."
     },
     {
       "name": "Symbol_CCompositor_ForceRender",
@@ -811,7 +840,10 @@
       ],
       "requirement": "required",
       "kind": "raw",
-      "type": "CDesktopManager_IsHighContrastMode_t"
+      "type": "CDesktopManager_IsHighContrastMode_t",
+      "platforms": [
+        "x64"
+      ]
     },
     {
       "name": "Symbol_CGraphicsDeviceManager_ReleaseGraphicsDevice",
@@ -1589,6 +1621,38 @@
         }
       ],
       "notes": "CDesktopManager::Initialize / CLivePreview::_FadeOutToGlass\n*((QWORD *)CDesktopManager::s_pDesktopManagerInstance + N) → CWindowList*"
+    },
+    {
+      "name": "CWindowList_DesktopWindowListMap",
+      "id": "CWindowList.DesktopWindowListMap",
+      "kind": "field",
+      "type": "DesktopWindowListMap",
+      "cases": [
+        {
+          "offset": "sizeof(PVOID)",
+          "otherwise": true
+        }
+      ],
+      "platforms": [
+        "arm64"
+      ],
+      "notes": "Verified on 22631 ARM64: CWindowList::StyleChange passes this address to the desktop-map lookup."
+    },
+    {
+      "name": "CWindowList_DESKTOP_WINDOWLIST_MAP_ENTRY_RList",
+      "id": "CWindowList.DESKTOP_WINDOWLIST_MAP_ENTRY.RList",
+      "kind": "field",
+      "type": "_LIST_ENTRY",
+      "cases": [
+        {
+          "offset": "10 * (LONGLONG)sizeof(PVOID)",
+          "otherwise": true
+        }
+      ],
+      "platforms": [
+        "arm64"
+      ],
+      "notes": "Verified on 22631 ARM64: the same entry offset the x64 GetWindowListForDesktop uses."
     },
     {
       "name": "CDesktopManager_GetWICFactory_Index",

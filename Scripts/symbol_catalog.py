@@ -66,9 +66,14 @@ def _selected_binding(symbol: Symbol, version: Version, configuration: str) -> t
     return None
 
 
-def _contract_rows(schema: ProjectionSchema, version: Version, configuration: str) -> list[dict[str, Any]]:
+def _contract_rows(
+    schema: ProjectionSchema,
+    version: Version,
+    configuration: str,
+    platform: str = "x64",
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for symbol in schema["symbols"]:
+    for symbol in projection_schema.platform_symbols(schema, platform):
         selected = _selected_binding(symbol, version, configuration)
         if selected is None:
             continue
@@ -89,9 +94,14 @@ def _contract_rows(schema: ProjectionSchema, version: Version, configuration: st
     return rows
 
 
-def resolution_contract(schema: ProjectionSchema, version: Version, configuration: str) -> str:
+def resolution_contract(
+    schema: ProjectionSchema,
+    version: Version,
+    configuration: str,
+    platform: str = "x64",
+) -> str:
     encoded = json.dumps(
-        _contract_rows(schema, version, configuration),
+        _contract_rows(schema, version, configuration, platform),
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,
@@ -161,6 +171,8 @@ def _normalize_records(
             raise SchemaError(f"{context}.resolution_contract is stale for the active projection bindings")
         active: dict[str, tuple[int, Symbol, SymbolBinding]] = {}
         for symbol_index, symbol in enumerate(schema["symbols"]):
+            if "x64" not in projection_schema.symbol_platforms(symbol):
+                continue
             selected = _selected_binding(symbol, version, "release")
             if selected is not None:
                 active[symbol["id"]] = (symbol_index, symbol, selected[1])
@@ -218,7 +230,16 @@ def _normalize_records(
     return normalized
 
 
-def load_catalog_sources(index: Path, architecture: str, schemas: Sequence[ProjectionSchema]) -> dict[str, Any]:
+def load_catalog_sources(
+    index: Path,
+    architecture: str,
+    schemas: Sequence[ProjectionSchema],
+    platform: str = "x64",
+) -> dict[str, Any]:
+    if platform != "x64":
+        raise SchemaError(
+            f"{index}: the prebaked symbol catalog is AMD64 PE/PDB evidence and cannot serve {platform}"
+        )
     raw_index = _read_object(index, str(index))
     _keys(raw_index, {"schema_version", "architecture", "resolver", "sources"}, str(index))
     if raw_index["schema_version"] != SCHEMA_VERSION:
@@ -294,6 +315,20 @@ def load_catalog_sources(index: Path, architecture: str, schemas: Sequence[Proje
         "resolver": resolver,
         "symbol_counts": {module: len(schema["symbols"]) for module, schema in schemas_by_module.items()},
         "records": normalized,
+    }
+
+
+def empty_catalog(architecture: str) -> dict[str, Any]:
+    """Catalog shape for a platform that has no prebaked evidence.
+
+    Every supported catalog record describes an AMD64 PE image and its PDB. A platform
+    compiled from its own DWM binaries resolves the same symbols from the local PDB, so
+    it publishes this empty catalog rather than a foreign one, and `CollectBuiltInSymbols`
+    reports that nothing was collected.
+    """
+    return {
+        "architecture": architecture,
+        "records": [],
     }
 
 def _guid_initializer(value: str) -> str:

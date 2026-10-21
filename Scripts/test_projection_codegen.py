@@ -583,5 +583,103 @@ class ProductionProjectionContractTests(unittest.TestCase):
 		)
 
 
+class PlatformProjectionTests(unittest.TestCase):
+	"""ARM64 and x64 resolve symbols from different PDBs with different name sets."""
+
+	def setUp(self) -> None:
+		self.temporary = tempfile.TemporaryDirectory()
+		self.repo = Path(self.temporary.name)
+		self.schema_root = self.repo / "OpenGlass" / "ProjectionSchemas" / "legacy"
+		self.schema_root.mkdir(parents=True)
+		(self.repo / "OpenGlass" / "OSHelper.hpp").write_text(
+			"enum os_build : ULONG { build_test = 100 }; enum os_revision : ULONG { revision_test = 1 };",
+			encoding="utf-8",
+		)
+		self.constants = projection_source_check.load_os_constants(self.repo)
+
+	def tearDown(self) -> None:
+		self.temporary.cleanup()
+
+	def validated(self, module: str, value: dict) -> projection_schema.ProjectionSchema:
+		path = self.schema_root / f"{module}.json"
+		path.write_text(json.dumps(value), encoding="utf-8")
+		return projection_schema.validate_schema(path, module, self.constants)
+
+	def test_arm64_symbol_names_replace_the_x64_names(self) -> None:
+		value = schema("udwm", projected=True)
+		value["symbols"][0]["bindings"][0]["arm64_symbol_names"] = ["public: void Test::Run(void)"]
+		generated = projection_emit.generate_registry_inc(
+			[self.validated("udwm", value), schema("dwmcore", projected=False)],
+			"arm64",
+		)
+		self.assertIn("public: void Test::Run(void)", generated)
+		self.assertNotIn("__cdecl Test::Run", generated)
+
+	def test_arm64_symbol_names_must_differ_and_stay_unique(self) -> None:
+		value = schema("udwm", projected=True)
+		value["symbols"][0]["bindings"][0]["arm64_symbol_names"] = ["public: void __cdecl Test::Run(void)"]
+		with self.assertRaisesRegex(projection_schema.SchemaError, r"must differ from symbol_names"):
+			self.validated("udwm", value)
+
+		value["symbols"][0]["bindings"][0]["arm64_symbol_names"] = ["public: void A(void)", "public: void A(void)"]
+		with self.assertRaisesRegex(projection_schema.SchemaError, r"duplicate candidate"):
+			self.validated("udwm", value)
+
+	def test_platform_restriction_removes_symbol_from_the_other_registry(self) -> None:
+		value = schema("udwm", projected=False)
+		value["symbols"] = [{
+			"name": "Symbol_Test_Arm64_Only", "id": "Test::Arm64Only",
+			"bindings": [{
+				"symbol_names": ["public: void Test::Arm64Only(void)"],
+				"min_inclusive": None, "max_exclusive": None,
+			}],
+			"kind": "raw", "type": "void (*)()", "requirement": "required",
+			"platforms": ["arm64"],
+		}]
+		module = self.validated("udwm", value)
+		self.assertEqual(["arm64"], list(projection_schema.symbol_platforms(module["symbols"][0])))
+		self.assertEqual([], projection_schema.platform_symbols(module, "x64"))
+		self.assertEqual(1, len(projection_schema.platform_symbols(module, "arm64")))
+
+		x64_generated = projection_emit.generate_registry_inc([module], "x64")
+		self.assertNotIn("Symbol_Test_Arm64_Only", x64_generated)
+		self.assertIn("g_udwmCandidates[0]{}", x64_generated)
+
+	def test_platform_restriction_is_rejected_for_unknown_platform(self) -> None:
+		value = schema("udwm", projected=False)
+		value["layouts"][0]["platforms"] = ["arm64", "ia64"]
+		with self.assertRaisesRegex(projection_schema.SchemaError, r"unsupported platform"):
+			self.validated("udwm", value)
+
+	def test_arm64ec_and_amd64_map_onto_the_two_name_sets(self) -> None:
+		self.assertEqual("arm64", projection_schema.normalize_platform("ARM64EC"))
+		self.assertEqual("arm64", projection_schema.normalize_platform("arm64"))
+		self.assertEqual("x64", projection_schema.normalize_platform("x64"))
+		self.assertEqual("x64", projection_schema.normalize_platform("AMD64"))
+		with self.assertRaisesRegex(projection_schema.SchemaError, r"unsupported platform"):
+			projection_schema.normalize_platform("x86")
+
+	def test_architecture_conditional_source_is_filtered_per_platform(self) -> None:
+		source = (
+			"#if defined(_M_ARM64)\n"
+			"Projection::Invoke<&Test::Arm64>();\n"
+			"#else\n"
+			"Projection::Invoke<&Test::X64>();\n"
+			"#endif\n"
+			"Projection::Invoke<&Test::Shared>();\n"
+		)
+		arm64 = projection_source_check.select_platform_source(source, "arm64")
+		self.assertIn("Test::Arm64", arm64)
+		self.assertNotIn("Test::X64", arm64)
+		self.assertIn("Test::Shared", arm64)
+
+		x64 = projection_source_check.select_platform_source(source, "x64")
+		self.assertIn("Test::X64", x64)
+		self.assertNotIn("Test::Arm64", x64)
+
+		unrelated = "#ifndef MY_GUARD\nIncluded();\n#endif\nBody();\n"
+		self.assertIn("Included()", projection_source_check.select_platform_source(unrelated, "arm64"))
+
+
 if __name__ == "__main__":
 	unittest.main()

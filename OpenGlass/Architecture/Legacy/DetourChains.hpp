@@ -29,7 +29,13 @@ namespace OpenGlass::GlassReflectionHandler
 		dwmcore::CDrawListEntryBuilder* drawListEntryBuilder,
 		bool unknown,
 		UINT commandType,
+		// ARM64 passes the 16-byte gsl::span<const BYTE> by value in two registers;
+		// x64 lowers the same aggregate to a hidden reference.
+#if defined(_M_ARM64)
+		DWM::span<const BYTE> resources,
+#else
 		DWM::span<const BYTE>* resources,
+#endif
 		bool* succeeded
 	);
 	HRESULT MyCRenderData_TryDrawCommandAsDrawList_Win11(
@@ -38,7 +44,13 @@ namespace OpenGlass::GlassReflectionHandler
 		dwmcore::CDrawListCache* drawListCache,
 		dwmcore::CDrawListEntryBuilder* drawListEntryBuilder,
 		UINT commandType,
+		// ARM64 passes the 16-byte gsl::span<const BYTE> by value in two registers;
+		// x64 lowers the same aggregate to a hidden reference.
+#if defined(_M_ARM64)
+		DWM::span<const BYTE> resources,
+#else
 		DWM::span<const BYTE>* resources,
+#endif
 		bool* succeeded
 	);
 }
@@ -52,7 +64,13 @@ namespace OpenGlass::GlassRenderer
 		dwmcore::CDrawListEntryBuilder* drawListEntryBuilder,
 		bool unknown,
 		UINT commandType,
+		// ARM64 passes the 16-byte gsl::span<const BYTE> by value in two registers;
+		// x64 lowers the same aggregate to a hidden reference.
+#if defined(_M_ARM64)
+		DWM::span<const BYTE> resources,
+#else
 		DWM::span<const BYTE>* resources,
+#endif
 		bool* succeeded
 	);
 	HRESULT MyCRenderData_TryDrawCommandAsDrawList_Win11(
@@ -61,7 +79,13 @@ namespace OpenGlass::GlassRenderer
 		dwmcore::CDrawListCache* drawListCache,
 		dwmcore::CDrawListEntryBuilder* drawListEntryBuilder,
 		UINT commandType,
+		// ARM64 passes the 16-byte gsl::span<const BYTE> by value in two registers;
+		// x64 lowers the same aggregate to a hidden reference.
+#if defined(_M_ARM64)
+		DWM::span<const BYTE> resources,
+#else
 		DWM::span<const BYTE>* resources,
+#endif
 		bool* succeeded
 	);
 }

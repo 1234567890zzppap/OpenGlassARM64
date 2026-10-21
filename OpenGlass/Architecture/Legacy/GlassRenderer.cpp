@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "StartupTrace.hpp"
 #include "HookHelper.hpp"
 #include "uDwmProjection.hpp"
 #include "dwmcoreProjection.hpp"
@@ -200,15 +201,29 @@ HRESULT GlassRenderer::MyCRenderData_TryDrawCommandAsDrawList_Win10(
 	dwmcore::CDrawListEntryBuilder* drawListEntryBuilder,
 	bool unknwon,
 	UINT commandType,
+	// ARM64 passes the 16-byte gsl::span<const BYTE> by value in two registers;
+	// x64 lowers the same aggregate to a hidden reference.
+#if defined(_M_ARM64)
+	DWM::span<const BYTE> resources,
+#else
 	DWM::span<const BYTE>* resources,
+#endif
 	bool* succeeded
 )
 {
+#if defined(_M_ARM64)
+	// The shared analysis helper works on the semantic span, so hand it the
+	// address of this frame's by-value copy; the trampoline still receives the
+	// span by value.
+	const auto resources_ptr = &resources;
+#else
+	const auto resources_ptr = resources;
+#endif
 	return MyCRenderData_TryDrawCommandAsDrawList(
 		This,
 		drawingContext,
 		commandType,
-		resources,
+		resources_ptr,
 		succeeded,
 		[=]()
 		{
@@ -232,15 +247,29 @@ HRESULT GlassRenderer::MyCRenderData_TryDrawCommandAsDrawList_Win11(
 	dwmcore::CDrawListCache* drawListCache,
 	dwmcore::CDrawListEntryBuilder* drawListEntryBuilder,
 	UINT commandType,
+	// ARM64 passes the 16-byte gsl::span<const BYTE> by value in two registers;
+	// x64 lowers the same aggregate to a hidden reference.
+#if defined(_M_ARM64)
+	DWM::span<const BYTE> resources,
+#else
 	DWM::span<const BYTE>* resources,
+#endif
 	bool* succeeded
 )
 {
+#if defined(_M_ARM64)
+	// The shared analysis helper works on the semantic span, so hand it the
+	// address of this frame's by-value copy; the trampoline still receives the
+	// span by value.
+	const auto resources_ptr = &resources;
+#else
+	const auto resources_ptr = resources;
+#endif
 	return MyCRenderData_TryDrawCommandAsDrawList(
 		This,
 		drawingContext,
 		commandType,
-		resources,
+		resources_ptr,
 		succeeded,
 		[=]()
 		{
@@ -344,6 +373,31 @@ HRESULT GlassRenderer::MyCDrawingContext_DrawGeometry(
 		return S_OK;
 	}
 
+	{
+		static std::atomic<unsigned> s_logged{ 0 };
+		const auto sample = s_logged.fetch_add(1, std::memory_order_relaxed);
+		if (sample < 24 || (sample % 500) == 0)
+		{
+			StartupTrace::Write(
+				"renderer: geometry shape=%g,%g,%g,%g clip=%g,%g,%g,%g world=%g,%g,%g,%g,%g,%g",
+				renderingShapeBounds.left,
+				renderingShapeBounds.top,
+				renderingShapeBounds.right,
+				renderingShapeBounds.bottom,
+				g_drawingWorldBounds.left,
+				g_drawingWorldBounds.top,
+				g_drawingWorldBounds.right,
+				g_drawingWorldBounds.bottom,
+				matrix->_11,
+				matrix->_12,
+				matrix->_21,
+				matrix->_22,
+				matrix->_31,
+				matrix->_32
+			);
+		}
+	}
+
 	g_drawingContextNoRef = drawingContext;
 	g_currentDeviceResources = &g_deviceResources.try_emplace(d2dContext).first->second;
 	g_renderTargetIgnoresAlpha = false;
@@ -377,7 +431,29 @@ HRESULT GlassRenderer::MyCDrawingContext_DrawGeometry(
 		const auto solidColorBrush = static_cast<dwmcore::CSolidColorLegacyMilBrush*>(brush);
 		const auto sdrBoost = drawingContext->GetSDRBoost();
 		color = solidColorBrush->GetRealizedColor();
-		
+
+		{
+			static std::atomic<unsigned> s_logged{ 0 };
+			const auto sample = s_logged.fetch_add(1, std::memory_order_relaxed);
+			if (sample < 40 || (sample % 500) == 0)
+			{
+				const auto reinterpreter = GlassKernel::AlphaChannelReinterpreter(color.a);
+				StartupTrace::Write(
+					"draw: solid brush=%p color=%g,%g,%g,%g marker=%#010x valid=%d active=%d maximized=%d expansion=%g",
+					static_cast<void*>(brush),
+					color.r,
+					color.g,
+					color.b,
+					color.a,
+					*reinterpret_cast<const DWORD*>(&color.a),
+					reinterpreter.GetIsValid() ? 1 : 0,
+					reinterpreter.GetIsActive() ? 1 : 0,
+					reinterpreter.GetIsMaximized() ? 1 : 0,
+					GlassKernel::GetBlurExpansion()
+				);
+			}
+		}
+
 		if (color.a == 0.f)
 		{
 			return S_OK;
@@ -532,7 +608,62 @@ HRESULT GlassRenderer::MyCDrawingContext_DrawGeometry(
 			g_ID2D1DeviceContext_FillGeometry_Hook.AttachOnce(g_ID2D1DeviceContext_FillGeometry_Org_Address, &g_ID2D1DeviceContext_FillGeometry_Org);
 		}
 
+#if defined(_M_ARM64)
+		if (dwmcore::g_versionInfo.build >= os::build_w11_24h2)
+		{
+			// 24H2 ARM64 keeps FillShapeWithBrush inlined in every caller, so the exported entry
+			// point is gone. Rather than routing through a different drawing-context entry point
+			// and hoping it reaches the hooked device-context fill, take the shape's D2D geometry
+			// and call the hooked FillGeometry directly: that is exactly the call the frame
+			// renderer waits for, and the clipping scope established by our caller still applies.
+			winrt::com_ptr<ID2D1Geometry> shapeGeometry{};
+			const auto geometryResult = renderingShape->GetD2DGeometry(nullptr, shapeGeometry.put());
+			{
+				static std::atomic<unsigned> s_logged{ 0 };
+				const auto sample = s_logged.fetch_add(1, std::memory_order_relaxed);
+				if (sample < 40 || (sample % 500) == 0)
+				{
+					StartupTrace::Write(
+						"renderer: fill geometry hr=%#08x geometry=%p brush=%p bounds=%g,%g,%g,%g rects=%d",
+						static_cast<unsigned long>(geometryResult),
+						static_cast<void*>(shapeGeometry.get()),
+						static_cast<void*>(g_currentDeviceResources->m_brush.get()),
+						g_drawingWorldBounds.left,
+						g_drawingWorldBounds.top,
+						g_drawingWorldBounds.right,
+						g_drawingWorldBounds.bottom,
+						g_shapeIsRectangles ? 1 : 0
+					);
+				}
+			}
+			RETURN_IF_FAILED(geometryResult);
+			if (!shapeGeometry)
+			{
+				return S_OK;
+			}
+			context->FillGeometry(shapeGeometry.get(), g_currentDeviceResources->m_brush.get(), nullptr);
+			return S_OK;
+		}
+#endif
 		return drawingContext->FillShapeWithBrush(renderingShape.get(), g_currentDeviceResources->m_brush.get());
+	}
+
+	{
+		static std::atomic<unsigned> s_logged{ 0 };
+		const auto sample = s_logged.fetch_add(1, std::memory_order_relaxed);
+		if (sample < 40 || (sample % 500) == 0)
+		{
+			StartupTrace::Write(
+				"draw: skip brush=%p vftable=%p rendered=%d bounds=%g,%g,%g,%g",
+				static_cast<void*>(brush),
+				static_cast<void*>(HookHelper::get_vftable_from(brush)),
+				g_renderFlag.any() ? 1 : 0,
+				g_drawingWorldBounds.left,
+				g_drawingWorldBounds.top,
+				g_drawingWorldBounds.right,
+				g_drawingWorldBounds.bottom
+			);
+		}
 	}
 
 	return S_OK;
@@ -546,6 +677,29 @@ void GlassRenderer::MyID2D1DeviceContext_FillGeometry(
 )
 {
 	const auto fillGeometryScope = wil::scope_exit([] { g_renderFlag.reset(); });
+	{
+		static std::atomic<unsigned> s_logged{ 0 };
+		const auto sample = s_logged.fetch_add(1, std::memory_order_relaxed);
+		if (sample < 60 || (sample % 500) == 0)
+		{
+			StartupTrace::Write(
+				"fill: dc geometry=%p brush=%p opacityBrush=%p hooked=%d solid=%d backdrop=%d material=%d reflection=%d opaque=%d bounds=%g,%g,%g,%g",
+				static_cast<void*>(geometry),
+				static_cast<void*>(brush),
+				static_cast<void*>(opacityBrush),
+				(g_currentDeviceResources && !opacityBrush) ? 1 : 0,
+				g_renderFlag.test(RenderFlag_SolidColor) ? 1 : 0,
+				g_renderFlag.test(RenderFlag_Backdrop) ? 1 : 0,
+				g_renderFlag.test(RenderFlag_Material) ? 1 : 0,
+				g_renderFlag.test(RenderFlag_Reflection) ? 1 : 0,
+				g_colorIsOpaque ? 1 : 0,
+				g_drawingWorldBounds.left,
+				g_drawingWorldBounds.top,
+				g_drawingWorldBounds.right,
+				g_drawingWorldBounds.bottom
+			);
+		}
+	}
 	if (
 		!g_currentDeviceResources ||
 		opacityBrush
@@ -607,20 +761,39 @@ void GlassRenderer::MyID2D1DeviceContext_FillGeometry(
 	}
 	if (g_renderFlag.test(RenderFlag_Backdrop))
 	{
-		LOG_IF_FAILED(This->Flush());
+		const auto flushResult = This->Flush();
 
 		if (std::holds_alternative<CGlassRealizer>(g_currentDeviceResources->m_glassRealizer))
 		{
-			LOG_IF_FAILED(
-				std::get<CGlassRealizer>(g_currentDeviceResources->m_glassRealizer).Render(
-					This,
-					geometry,
-					g_drawingWorldBounds,
-					g_rectangleSpan,
-					g_params,
-					g_type
-				)
+			const auto renderResult = std::get<CGlassRealizer>(g_currentDeviceResources->m_glassRealizer).Render(
+				This,
+				geometry,
+				g_drawingWorldBounds,
+				g_rectangleSpan,
+				g_params,
+				g_type
 			);
+			// Every step of the D2D realizer is a RETURN_IF_FAILED, so a single failing call
+			// silently leaves the region unpainted. Record both results rather than swallowing them.
+			{
+				static std::atomic<unsigned> s_logged{ 0 };
+				const auto sample = s_logged.fetch_add(1, std::memory_order_relaxed);
+				if (FAILED(renderResult) || sample < 16 || (sample % 128) == 0)
+				{
+					StartupTrace::Write(
+						"renderer: backdrop flush=%#08x render=%#08x type=%d rects=%zu bounds=%g,%g,%g,%g",
+						static_cast<unsigned long>(flushResult),
+						static_cast<unsigned long>(renderResult),
+						static_cast<int>(g_type),
+						g_rectangleSpan.size(),
+						g_drawingWorldBounds.left,
+						g_drawingWorldBounds.top,
+						g_drawingWorldBounds.right,
+						g_drawingWorldBounds.bottom
+					);
+				}
+			}
+			LOG_IF_FAILED(renderResult);
 		}
 		else
 		{

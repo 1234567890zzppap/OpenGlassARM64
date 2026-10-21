@@ -11,10 +11,24 @@
 #include "uDwmProjection.hpp"
 #include "dwmcoreProjection.hpp"
 #include "GlassEngine.hpp"
+#include "StartupTrace.hpp"
 
 #ifndef _DEBUG
 #pragma optimize("s", on)
 #endif
+
+namespace
+{
+	// Startup milestones go through the shared trace helper so every module can report
+	// progress without duplicating the file handling.
+	inline void TraceStartup(PCSTR format, ...) noexcept
+	{
+		va_list arguments;
+		va_start(arguments, format);
+		OpenGlass::StartupTrace::WriteV(format, arguments);
+		va_end(arguments);
+	}
+}
 
 namespace OpenGlass
 {
@@ -341,6 +355,7 @@ bool OpenGlass::InitializeProjectionBySymbols()
 
 		const auto udwmModuleHandle = GetModuleHandleW(L"uDWM.dll");
 		const auto dwmcoreModuleHandle = GetModuleHandleW(L"dwmcore.dll");
+		TraceStartup("projection: uDWM=%p dwmcore=%p", udwmModuleHandle, dwmcoreModuleHandle);
 		if (
 			!uDWM::g_registry.Freeze(
 				{ uDWM::g_versionInfo.build, uDWM::g_versionInfo.revision }
@@ -350,8 +365,10 @@ bool OpenGlass::InitializeProjectionBySymbols()
 			)
 		)
 		{
+			TraceStartup("projection: registry Freeze rejected the current version");
 			return false;
 		}
+		TraceStartup("projection: registries frozen");
 		std::filesystem::path symbolPath;
 		std::unique_ptr<CSymbolParser> parser;
 		std::unique_ptr<CSymbolDownloader> downloader;
@@ -426,10 +443,13 @@ bool OpenGlass::InitializeProjectionBySymbols()
 			else
 			{
 				ensureSymbolParser();
+				TraceStartup("projection: parsing the uDWM PDB from %ls", symbolPath.c_str());
 				hr = parser->ParsePdb(udwmModuleHandle, uDWM::g_registry);
+				TraceStartup("projection: uDWM PDB parse returned %#08x", hr);
 			}
 			if (hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND))
 			{
+				TraceStartup("projection: uDWM PDB missing, starting the symbol downloader");
 				showSymbolDownloaderUI();
 
 				ensureDownloader();
@@ -611,32 +631,38 @@ bool OpenGlass::InitializeProjectionBySymbols()
 
 DWORD WINAPI OpenGlass::InitializationThreadEntryPoint(PVOID)
 {
+	TraceStartup("init thread: enter");
 	SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 	FAIL_FAST_IF_FAILED(SetThreadDescription(GetCurrentThread(), L"OpenGlass Initialization Thread"));
 
 	Startup();
 
+	TraceStartup("init thread: exit");
 	return S_OK;
 }
 
 DWORD WINAPI OpenGlass::UnInitializationThreadEntryPoint(PVOID)
 {
+	TraceStartup("uninit thread: enter");
 	SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 	FAIL_FAST_IF_FAILED(SetThreadDescription(GetCurrentThread(), L"OpenGlass UnInitialization Thread"));
 
 	Shutdown();
 
+	TraceStartup("uninit thread: before FreeLibraryAndExitThread");
 	FreeLibraryAndExitThread(wil::GetModuleInstanceHandle(), S_OK);
 }
 
 void OpenGlass::Startup()
 {
+	TraceStartup("startup: enter, waiting for the DWM notification window");
 	{
 		HWND hWnd{ nullptr };
 		// just wait patiently, in case the dwm notification window is not ready...
 		while (!(hWnd = FindWindowW(L"DWM", nullptr))) { Sleep(50); }
 		GlassEngine::SetDwmNotificationWindow(hWnd);
 	}
+	TraceStartup("startup: notification window %p", GlassEngine::GetDwmNotificationWindow());
 
 	wil::SetResultLoggingCallback([](const wil::FailureInfo& failure) static noexcept
 	{
@@ -651,12 +677,20 @@ void OpenGlass::Startup()
 
 	THROW_IF_FAILED(RoInitialize(RO_INIT_MULTITHREADED));
 	wil::unique_rouninitialize_call wrtScope{};
+	TraceStartup("startup: RoInitialize done");
 
 	if (
 		!uDWM::g_registry.RecognizesBuild(uDWM::g_versionInfo.build) ||
 		!dwmcore::g_registry.RecognizesBuild(dwmcore::g_versionInfo.build)
 	)
 	{
+		TraceStartup(
+			"startup: unrecognized build uDWM=%u.%u dwmcore=%u.%u, showing the version dialog",
+			uDWM::g_versionInfo.build,
+			uDWM::g_versionInfo.revision,
+			dwmcore::g_versionInfo.build,
+			dwmcore::g_versionInfo.revision
+		);
 		auto result = 0;
 		THROW_IF_FAILED(
 			Util::TaskDialog(
@@ -684,12 +718,16 @@ void OpenGlass::Startup()
 
 	if (!InitializeProjectionBySymbols())
 	{
+		TraceStartup("startup: projection initialization failed, returning without hooks");
 		return;
 	}
+	TraceStartup("startup: projection resolved");
 
 	GlassEngine::LoadRegistry(false);
+	TraceStartup("startup: registry loaded");
 	g_lifecycleState.store(LifecycleState::Preparing, std::memory_order_release);
 	GlassEngine::Startup();
+	TraceStartup("startup: engine started");
 	g_lifecycleState.store(LifecycleState::HooksActive, std::memory_order_release);
 
 	// make sure guis can send message to dwm

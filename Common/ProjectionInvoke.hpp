@@ -157,7 +157,9 @@ namespace OpenGlass::Projection
 
 	template <auto Target> inline projected_abi_t<Target>& Invoke = g_projectedSlot<Target>;
 
-#ifdef _DEBUG
+#if defined(_DEBUG) || defined(_M_ARM64)
+// MSVC does not implement [[msvc::musttail]] for ARM64, so every forwarded
+// projection goes through a regular tail call there.
 #define OPENGLASS_MUSTTAIL
 #else
 #define OPENGLASS_MUSTTAIL [[msvc::musttail]]

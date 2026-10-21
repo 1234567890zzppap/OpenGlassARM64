@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "StartupTrace.hpp"
 #include "Shared.hpp"
 #include "GlassEngine.hpp"
 #include "CaptionTextHandler.hpp"
@@ -109,25 +110,44 @@ void GlassEngine::Startup()
 	// to avoid racing with it and causing potential deadlock or other issues
 	LOG_IF_FAILED(DwmFlush());
 
+	StartupTrace::Write("engine: hook rundown opened");
 	HookHelper::GetHookRundown().Open();
 	{
 		HookHelper::HookTransaction transaction{ HookHelper::HookMode::Install };
+		StartupTrace::Write("engine: GlassKernel::Startup");
 		GlassKernel::Startup();
+		StartupTrace::Write("engine: GlassIntegrity::Startup");
 		GlassIntegrity::Startup();
+		StartupTrace::Write("engine: GlassRenderer::Startup");
 		GlassRenderer::Startup();
 		{
 			const auto lock = wil::EnterCriticalSection(uDWM::CDesktopManager::s_csDwmInstance);
+			StartupTrace::Write("engine: CustomThemeAtlasLoader::Startup");
 			CustomThemeAtlasLoader::Startup();
+			StartupTrace::Write("engine: CaptionTextHandler::Startup");
 			CaptionTextHandler::Startup();
+			StartupTrace::Write("engine: CaptionMetricsTweaker::Startup");
 			CaptionMetricsTweaker::Startup();
+			StartupTrace::Write("engine: ButtonGlowHandler::Startup");
 			ButtonGlowHandler::Startup();
+			StartupTrace::Write("engine: AccentOverrider::Startup");
 			AccentOverrider::Startup();
+			StartupTrace::Write("engine: GlassFrameHandler::Startup");
 			GlassFrameHandler::Startup();
+			StartupTrace::Write("engine: GlassFrameEnhancer::Startup");
 			GlassFrameEnhancer::Startup();
+			StartupTrace::Write("engine: GlassFrameDemodernizer::Startup");
 			GlassFrameDemodernizer::Startup();
+			StartupTrace::Write("engine: GlassReflectionHandler::Startup");
 			GlassReflectionHandler::Startup();
+			StartupTrace::Write("engine: committing the hook transaction");
+			StartupTrace::Write("shutdown: committing the remove transaction");
 			transaction.Commit();
-			GlassKernel::RedrawAllTopLevelWindow(true);
+			StartupTrace::Write("shutdown: remove transaction committed");
+			StartupTrace::Write("engine: hook transaction committed");
+			StartupTrace::Write("engine: redrawing all top-level windows");
+			GlassKernel::RedrawAllTopLevelWindow(true);
+			StartupTrace::Write("engine: startup complete");
 		}
 	}
 }
@@ -137,11 +157,13 @@ void GlassEngine::Activate()
 }
 void GlassEngine::Shutdown()
 {
+	StartupTrace::Write("shutdown: begin");
 	HookHelper::GetHookRundown().BeginShutdown();
 	LOG_IF_FAILED(DwmFlush());
 
 	{
 		HookHelper::HookTransaction transaction{ HookHelper::HookMode::Remove };
+		StartupTrace::Write("shutdown: removing hooks");
 		GlassReflectionHandler::Shutdown();
 		GlassFrameDemodernizer::Shutdown();
 		GlassFrameEnhancer::Shutdown();
@@ -156,11 +178,15 @@ void GlassEngine::Shutdown()
 		GlassKernel::Shutdown();
 		{
 			const auto lock = wil::EnterCriticalSection(uDWM::CDesktopManager::s_csDwmInstance);
+			StartupTrace::Write("shutdown: committing the remove transaction");
 			transaction.Commit();
+			StartupTrace::Write("shutdown: remove transaction committed");
 		}
 	}
 
+	StartupTrace::Write("shutdown: waiting for the hook rundown");
 	HookHelper::GetHookRundown().WaitForDrain(std::chrono::seconds{ 1 });
+	StartupTrace::Write("shutdown: hook rundown drained");
 
 	{
 		const auto lock = wil::EnterCriticalSection(uDWM::CDesktopManager::s_csDwmInstance);
@@ -178,7 +204,9 @@ void GlassEngine::Shutdown()
 
 	{
 		const auto lock = wil::EnterCriticalSection(uDWM::CDesktopManager::s_csDwmInstance);
+		StartupTrace::Write("shutdown: redrawing all top-level windows");
 		GlassKernel::RedrawAllTopLevelWindow(true);
+		StartupTrace::Write("shutdown: redraw done");
 		GlassRenderer::Cleanup();
 		GlassIntegrity::Cleanup();
 		GlassKernel::Cleanup();

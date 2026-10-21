@@ -19,14 +19,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--architecture", choices=projection_schema.ARCHITECTURES, required=True)
+    parser.add_argument(
+        "--platform",
+        default="x64",
+        help="CPU platform whose exact symbol names are emitted (x64, ARM64, or ARM64EC)",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--check", action="store_true", help="validate without writing generated files")
     return parser.parse_args(argv)
 
 
-def generate(repo: Path, architecture: str) -> dict[str, str]:
+def generate(repo: Path, architecture: str, platform: str = "x64") -> dict[str, str]:
     """Validate one architecture and return its complete generated output set."""
     repo = repo.resolve()
+    platform = projection_schema.normalize_platform(platform)
     if not repo.is_dir():
         raise projection_schema.SchemaError(f"repository does not exist: {repo}")
     if architecture not in projection_schema.ARCHITECTURES:
@@ -53,14 +59,17 @@ def generate(repo: Path, architecture: str) -> dict[str, str]:
         )
         for module in projection_schema.MODULES
     ]
-    projection_source_check.validate_source_completeness(projection_root, schemas)
-    generated = projection_emit.generate_files(schemas)
-    catalog = symbol_catalog.load_catalog_sources(
-        repo / "OpenGlass" / "SymbolCatalogs" / architecture / "index.json",
-        architecture,
-        schemas,
-    )
-    generated.update(symbol_catalog.generate_files(catalog))
+    projection_source_check.validate_source_completeness(projection_root, schemas, platform)
+    generated = projection_emit.generate_files(schemas, platform)
+    catalog_index = repo / "OpenGlass" / "SymbolCatalogs" / architecture / "index.json"
+    # The prebaked catalog is AMD64 PE/PDB evidence. Other platforms resolve every symbol
+    # from their own PDB at runtime, so they publish an empty catalog that the build target
+    # still produces because BuiltInSymbolCatalog.cpp always includes it.
+    if platform == "x64" and catalog_index.is_file():
+        catalog = symbol_catalog.load_catalog_sources(catalog_index, architecture, schemas, platform)
+        generated.update(symbol_catalog.generate_files(catalog))
+    elif platform != "x64":
+        generated.update(symbol_catalog.generate_files(symbol_catalog.empty_catalog(architecture)))
     return generated
 
 
@@ -100,8 +109,8 @@ def publish(output: Path, generated: dict[str, str]) -> None:
         atomic_write(output / name, content)
 
 
-def run(repo: Path, architecture: str, output: Path, check: bool) -> None:
-    generated = generate(repo, architecture)
+def run(repo: Path, architecture: str, output: Path, check: bool, platform: str = "x64") -> None:
+    generated = generate(repo, architecture, platform)
     if not check:
         publish(output.resolve(), generated)
 
@@ -109,7 +118,7 @@ def run(repo: Path, architecture: str, output: Path, check: bool) -> None:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        run(args.repo, args.architecture, args.output, args.check)
+        run(args.repo, args.architecture, args.output, args.check, args.platform)
     except projection_schema.SchemaError as error:
         print(f"projection_codegen: error: {error}", file=sys.stderr)
         return 1

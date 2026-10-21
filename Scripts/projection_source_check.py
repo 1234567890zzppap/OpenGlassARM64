@@ -10,7 +10,29 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from projection_schema import INTEGER_RE, ProjectionSchema, SchemaError, Symbol, normalize_target
+from projection_schema import (
+    INTEGER_RE,
+    ProjectionSchema,
+    SchemaError,
+    Symbol,
+    normalize_target,
+    platform_layouts,
+    platform_symbols,
+)
+
+
+# Architecture macros that select a platform-specific projection implementation.
+# Blocks guarded by one of these are evaluated for the target platform only, so a
+# source file may legitimately show one Invoke site per architecture.
+PLATFORM_MACROS = {
+    "_M_ARM64": "arm64",
+    "_M_ARM64EC": "arm64",
+    "_ARM64_": "arm64",
+    "_M_AMD64": "x64",
+    "_M_X64": "x64",
+    "_AMD64_": "x64",
+}
+CONDITIONAL_RE = re.compile(r"^\s*#\s*(if|ifdef|ifndef|elif|else|endif)\b(.*)$")
 
 
 INVOKE_RE = re.compile(r"Projection\s*::\s*Invoke\s*<\s*(&[^>]+)\s*>")
@@ -81,6 +103,73 @@ def _read_source(path: Path) -> str:
         raise SchemaError(f"cannot read projection source {path}: {error}") from error
 
 
+def _platform_condition(expression: str, platform: str, *, negate: bool = False) -> bool | None:
+    """Evaluate a single architecture-macro condition, or None when it is unrelated.
+
+    Handles ``defined(X)``, ``X``, ``!defined(X)`` and ``!X`` for the architecture macros
+    only. Compound expressions referencing other macros stay unrelated so their content
+    keeps participating in the source checks on every platform.
+    """
+    text = expression.strip()
+    if text.startswith("!"):
+        negate = not negate
+        text = text[1:].lstrip()
+    macro_text = re.sub(r"\bdefined\s*\(?\s*([A-Za-z_]\w*)\s*\)?", r"\1", text)
+    macros = {macro for macro in PLATFORM_MACROS if re.search(rf"\b{macro}\b", macro_text)}
+    if not macros:
+        return None
+    remainder = macro_text
+    for macro in macros:
+        remainder = remainder.replace(macro, "")
+    if re.sub(r"[\s()]", "", remainder):
+        # Compound condition or an unrelated macro: keep the block on every platform.
+        return None
+    return any(PLATFORM_MACROS[macro] == platform for macro in macros) != negate
+
+
+def select_platform_source(text: str, platform: str) -> str:
+    """Drop architecture-conditional blocks that the target platform never compiles.
+
+    Only blocks whose condition mentions a known architecture macro are evaluated;
+    unrelated preprocessor constructs stay in the text and are treated as taken so
+    their content keeps participating in the source checks.
+    """
+    output: list[str] = []
+    # Each frame: (platform-specific condition or None, branch currently taken)
+    frames: list[tuple[bool | None, bool]] = []
+
+    def emitted() -> bool:
+        return all(taken for _, taken in frames)
+
+    for line in text.splitlines(keepends=True):
+        match = CONDITIONAL_RE.match(line)
+        if match is None:
+            if emitted():
+                output.append(line)
+            else:
+                output.append("\n" if line.endswith("\n") else "")
+            continue
+
+        directive, expression = match.group(1), match.group(2)
+        if directive in ("if", "ifdef", "ifndef"):
+            condition = _platform_condition(expression, platform, negate=directive == "ifndef")
+            frames.append((condition, condition is not False))
+        elif directive == "elif" and frames:
+            condition, _ = frames[-1]
+            if condition is None:
+                frames[-1] = (None, True)
+            else:
+                current = _platform_condition(expression, platform)
+                frames[-1] = (current, current is not False)
+        elif directive == "else" and frames:
+            condition, taken = frames[-1]
+            frames[-1] = (condition, condition is None or not taken)
+        elif directive == "endif" and frames:
+            frames.pop()
+        output.append(line)
+    return "".join(output)
+
+
 def load_os_constants(repo: Path) -> dict[str, int]:
     """Read build and revision constants referenced by Layout boundaries."""
     path = repo / "OpenGlass" / "OSHelper.hpp"
@@ -109,12 +198,12 @@ def load_os_constants(repo: Path) -> dict[str, int]:
     return values
 
 
-def projection_source(projection_root: Path) -> str:
+def projection_source(projection_root: Path, platform: str = "x64") -> str:
     """Return stripped shared and architecture-private OpenGlass source."""
     source_root = projection_root.parents[1]
     paths = sorted(source_root.glob("*.cpp")) + sorted(source_root.glob("*.hpp")) + sorted(source_root.glob("*.h"))
     paths += sorted(projection_root.rglob("*.cpp")) + sorted(projection_root.rglob("*.hpp")) + sorted(projection_root.rglob("*.h"))
-    return "\n".join(_read_source(path) for path in paths)
+    return "\n".join(select_platform_source(_read_source(path), platform) for path in paths)
 
 
 def _matching_delimiter(source: str, start: int, opening: str, closing: str) -> int | None:
@@ -214,16 +303,20 @@ def projected_variable_has_consumer(source: str, target: str) -> bool:
     return has_inline_storage and qualified_use.search(source) is not None
 
 
-def validate_source_completeness(projection_root: Path, schemas: list[ProjectionSchema]) -> None:
+def validate_source_completeness(
+    projection_root: Path,
+    schemas: list[ProjectionSchema],
+    platform: str = "x64",
+) -> None:
     """Validate wrappers and require a real source consumer for each descriptor."""
     headers = sorted(projection_root.rglob("*.hpp"))
-    source = "\n".join(_read_source(path) for path in headers)
+    source = "\n".join(select_platform_source(_read_source(path), platform) for path in headers)
     invoked = [normalize_target(match.group(1)) for match in INVOKE_RE.finditer(source)]
     musttail_invoked = [normalize_target(match.group(1)) for match in MUSTTAIL_INVOKE_RE.finditer(source)]
     inline_invoked = [normalize_target(match.group(1)) for match in INLINE_INVOKE_RE.finditer(source)]
     declared: dict[str, list[Symbol]] = {}
     for schema in schemas:
-        for symbol in schema["symbols"]:
+        for symbol in platform_symbols(schema, platform):
             if symbol["kind"] == "projected_function":
                 target = normalize_target(symbol["target"])
                 declared.setdefault(target, []).append(symbol)
@@ -247,17 +340,17 @@ def validate_source_completeness(projection_root: Path, schemas: list[Projection
         if not projected_wrapper_is_pure(source, invoke_match, target):
             raise SchemaError(f"projected wrapper body must contain only the typed Invoke dispatch: {target}")
 
-    all_source = projection_source(projection_root)
+    all_source = projection_source(projection_root, platform)
     for schema in schemas:
-        for layout in schema["layouts"]:
+        for layout in platform_layouts(schema, platform):
             if not re.search(rf"\b{re.escape(layout['name'])}\b", all_source):
                 raise SchemaError(f"Layout schema has no typed source consumer: {layout['name']}")
-        for symbol in schema["symbols"]:
+        for symbol in platform_symbols(schema, platform):
             if symbol["kind"] != "raw" or symbol.get("diagnostic_only"):
                 continue
             if not re.search(rf"\b{re.escape(symbol['name'])}\b", all_source):
                 raise SchemaError(f"raw symbol schema has no direct consumer: {symbol['name']}")
-        for symbol in schema["symbols"]:
+        for symbol in platform_symbols(schema, platform):
             if symbol["kind"] != "projected_variable" or symbol.get("diagnostic_only"):
                 continue
             target = normalize_target(symbol["target"])

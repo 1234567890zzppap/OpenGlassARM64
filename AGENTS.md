@@ -17,6 +17,7 @@ Runtime flow: the Service Control Manager starts `OpenGlassHost.exe`; the host l
 
 - `OpenGlass.Legacy.vcxproj` builds the Legacy MIL compositor path for Windows 10 build 17763 through Windows 11 builds below 28000.
 - `OpenGlass.MILComp.vcxproj` builds the MILComp compositor path for build 28000+ through Windows.UI.Composition visual hooks. Its projection schema and ABI remain independent.
+- Every project exposes `x64` and `ARM64` configurations. The two DWM DLLs are built per CPU platform, because DWM exports a different symbol set and passes some aggregate arguments differently on AAPCS64. The projection schemas express those differences with `platforms`, `arm64_symbol_names`, and `arm64_type`, and the project files pass `--platform $(Platform)` to the generator. Do not add an `ARM64EC` configuration without verifying it: ARM64EC keeps the x64 calling convention, so it would pair ARM64 symbol names with x64-shaped detour signatures, and no ARM64EC dwm.exe exists to validate that.
 - `OpenGlass.Shared.vcxitems` explicitly lists shared source. Architecture-private code lives under `OpenGlass/Architecture/Legacy/` or `MILComp/`; do not introduce source wildcards or spread architecture-selection `#ifdef`s through shared business code.
 
 Determine compatibility from the OS build/revision and verified binary capabilities. Marketing labels such as 25H2, 26H1, or 26H2 are insufficient. Symbol presence, object layout, and feature availability are also separate facts: do not derive one from another or from allocation size alone.
@@ -27,7 +28,10 @@ Requirements are Visual Studio/MSBuild with the v145 C++ toolset, Windows SDK 10
 
 ```powershell
 msbuild OpenGlass.slnx /m /restore /p:Configuration=Release /p:Platform=x64
+msbuild OpenGlass.slnx /m /restore /p:Configuration=Release /p:Platform=ARM64
 ```
+
+Build both CPU platforms before claiming an architecture-only change is complete; an ARM64-only defect surfaces only in the ARM64 configuration, and the x64 configuration is what the default verification and packaging flows use. An ARM64 build can only be executed on ARM64 hardware, so an ARM64-only change additionally needs real-OS validation by someone with that hardware. The installer stays x64-only: `OpenGlassSetup.targets` runs packaging only for `Platform=x64`.
 
 Use `Release` for normal local verification. `ReleaseSigned` requires the shared signing environment and is not a general developer build. When Inno Setup is available, the solution packages `OpenGlassSetup.exe`; `ReleaseSigned` also produces `OpenGlassSetup.Signed.exe`. Each installer contains both architecture DLLs and installs only the one matching the detected OS build. The developer theme extension remains part of solution and CI builds. CI uploads its unsigned DLL and matching PDB as a separate developer artifact on every successful Build job, including pull requests and manual runs with installer packaging disabled. It is not included in formal Release assets. It remains unsigned in every configuration, including `ReleaseSigned`. The installer must not contain or manage the extension. Packaging also creates `OpenGlassSymbols.zip` with both DWM DLL PDBs and the common Host and GUI PDBs. The solution skips packaging, including the symbol archive, without failing when `ISCC.exe` is absent. Set `OpenGlassInstallerEnabled=false` to suppress packaging explicitly. Building the extension DLL requires no packaging tools. CI runs Python checks and builds/runs the non-injecting C++ tests in Verify before the dependent Build job builds the full solution and uploads artifacts; both jobs share dependency setup in `.github/actions/prepare-build/`.
 

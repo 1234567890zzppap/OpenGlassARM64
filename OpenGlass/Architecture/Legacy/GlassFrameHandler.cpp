@@ -7,6 +7,7 @@
 #include "GlassEffectBrush.hpp"
 #include "GlassReflectionBrush.hpp"
 #include "DetourChains.hpp"
+#include "StartupTrace.hpp"
 
 using namespace OpenGlass;
 
@@ -192,13 +193,56 @@ HRESULT GlassFrameHandler::MyCTopLevelWindow_UpdateNCAreaBackground(uDWM::CTopLe
 
 	const auto hr = g_CTopLevelWindow_UpdateNCAreaBackground_Org(This);
 
+	{
+		static std::atomic<unsigned> s_logged{ 0 };
+		const auto sample = s_logged.fetch_add(1, std::memory_order_relaxed);
+		if (sample < 16 || (sample % 64) == 0)
+		{
+			RECT windowRect{};
+			MARGINS clientMargins{};
+			MARGINS extendedFrameMargins{};
+			if (const auto data = This->GetData(); data)
+			{
+				windowRect = data->GetWindowRect();
+				clientMargins = data->GetClientMargins();
+				extendedFrameMargins = data->GetExtendedFrameMargins();
+			}
+			StartupTrace::Write(
+				"frame: nc-background window=%p active=%d maximized=%d rect=%ld,%ld,%ld,%ld clientMargins=%d,%d,%d,%d extended=%d,%d,%d,%d",
+				static_cast<void*>(This),
+				active ? 1 : 0,
+				maximized ? 1 : 0,
+				windowRect.left,
+				windowRect.top,
+				windowRect.right,
+				windowRect.bottom,
+				clientMargins.cxLeftWidth,
+				clientMargins.cxRightWidth,
+				clientMargins.cyTopHeight,
+				clientMargins.cyBottomHeight,
+				extendedFrameMargins.cxLeftWidth,
+				extendedFrameMargins.cxRightWidth,
+				extendedFrameMargins.cyTopHeight,
+				extendedFrameMargins.cyBottomHeight
+			);
+		}
+	}
+
 	auto effectBrush = GlassEffectBrush::GetOrCreate(This);
 
 	if (
 		const auto legacyVisual = This->GetLegacyVisual();
 		legacyVisual &&
 		SUCCEEDED(legacyVisual->_ValidateVisual()) &&
-		!legacyVisual->IsEmpty()
+		!legacyVisual->IsEmpty() &&
+		// 24H2 keeps a non-empty legacy visual on shells that have no caption at all (the
+		// taskbar and the desktop among them), so without this gate the glass also paints their
+		// frames. CTopLevelWindow::GetFrameInsideMargins().cyTopHeight is the caption height the
+		// background update itself works from: it is zero exactly for those windows.
+		(
+			uDWM::g_versionInfo.build < os::build_w11_24h2 ||
+			This->GetFrameInsideMargins().cyTopHeight > 0
+		)
 	)
 	{
 		const auto reflectionBrush = GlassReflectionBrush::GetOrCreate(
@@ -304,6 +348,29 @@ HRESULT GlassFrameHandler::MyCTopLevelWindow_UpdateNCAreaBackground(uDWM::CTopLe
 		)
 		{
 			accentVisual->SetDirtyFlags(0x1000);
+		}
+	}
+
+	{
+		static std::atomic<unsigned> s_logged{ 0 };
+		const auto sample = s_logged.fetch_add(1, std::memory_order_relaxed);
+		if (sample < 24 || (sample % 64) == 0)
+		{
+			const auto legacyVisual = This->GetLegacyVisual();
+			const auto offset = legacyVisual ? legacyVisual->GetLocalToParentVisualOffset(This->GetTransformParent()) : POINT{};
+			StartupTrace::Write(
+				"frame: nc-brush window=%p visual=%p instructions=%lu size=%ldx%ld offset=%ld,%ld effectBrush=%p captionBrush=%p captionGeometry=%p",
+				static_cast<void*>(This),
+				static_cast<void*>(legacyVisual),
+				legacyVisual ? legacyVisual->GetCount() : 0UL,
+				legacyVisual ? legacyVisual->GetWidth() : 0L,
+				legacyVisual ? legacyVisual->GetHeight() : 0L,
+				offset.x,
+				offset.y,
+				static_cast<void*>(effectBrush.get()),
+				static_cast<void*>(This->GetCaptionBrush()),
+				static_cast<void*>(This->GetCaptionGeometry())
+			);
 		}
 	}
 

@@ -61,6 +61,8 @@ namespace OpenGlass::uDWM
 	struct CWindowBorder;
 	struct CWindowData;
 	struct CWindowList;
+	struct DESKTOP_WINDOWLIST_MAP_ENTRY;
+	struct DesktopWindowListMap;
 	struct IText;
 	struct LivePreviewResource;
 	struct LivePreviewVisual;

@@ -234,14 +234,28 @@ HRESULT GlassReflectionHandler::MyCRenderData_TryDrawCommandAsDrawList_Win10(
 	dwmcore::CDrawListEntryBuilder* drawListEntryBuilder,
 	bool unknown,
 	UINT commandType,
+	// ARM64 passes the 16-byte gsl::span<const BYTE> by value in two registers;
+	// x64 lowers the same aggregate to a hidden reference.
+#if defined(_M_ARM64)
+	DWM::span<const BYTE> resources,
+#else
 	DWM::span<const BYTE>* resources,
+#endif
 	bool* succeeded
 )
 {
+#if defined(_M_ARM64)
+	// The shared analysis helper works on the semantic span, so hand it the
+	// address of this frame's by-value copy; the trampoline still receives the
+	// span by value.
+	const auto resources_ptr = &resources;
+#else
+	const auto resources_ptr = resources;
+#endif
 	return MyCRenderData_TryDrawCommandAsDrawList(
 		This,
 		commandType,
-		resources,
+		resources_ptr,
 		[=]()
 		{
 			return g_CRenderData_TryDrawCommandAsDrawList_Win10_Org(
@@ -264,14 +278,28 @@ HRESULT GlassReflectionHandler::MyCRenderData_TryDrawCommandAsDrawList_Win11(
 	dwmcore::CDrawListCache* drawListCache,
 	dwmcore::CDrawListEntryBuilder* drawListEntryBuilder,
 	UINT commandType,
+	// ARM64 passes the 16-byte gsl::span<const BYTE> by value in two registers;
+	// x64 lowers the same aggregate to a hidden reference.
+#if defined(_M_ARM64)
+	DWM::span<const BYTE> resources,
+#else
 	DWM::span<const BYTE>* resources,
+#endif
 	bool* succeeded
 )
 {
+#if defined(_M_ARM64)
+	// The shared analysis helper works on the semantic span, so hand it the
+	// address of this frame's by-value copy; the trampoline still receives the
+	// span by value.
+	const auto resources_ptr = &resources;
+#else
+	const auto resources_ptr = resources;
+#endif
 	return MyCRenderData_TryDrawCommandAsDrawList(
 		This,
 		commandType,
-		resources,
+		resources_ptr,
 		[=]()
 		{
 			return g_CRenderData_TryDrawCommandAsDrawList_Win11_Org(

@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "StartupTrace.hpp"
 #include "MsstyleInternals.hpp"
 #include "Shared.hpp"
 #include "HookHelper.hpp"
@@ -471,6 +472,9 @@ void CustomThemeAtlasLoader::Update(GlassEngine::UpdateType type)
 		DWORD active = 0, inactive = 0, maximized = 0, inactiveMaximized = 0, transparent = 0, opaque = 0;
 		const auto themeHandle = CustomThemeAtlasLoader::GetThemeHandle();
 
+		// A 0xFFFFFFFF value selects the theme's own value. Resolve the documented
+		// default before consulting the theme so a missing theme handle cannot leave the
+		// sentinel in place: opacity would read as 100% and a base color as opaque white.
 		active = GlassEngine::GetDwordFromRegistry(L"ColorizationGlassReflectionOpacity", 0xFFFFFFFE);
 		inactive = GlassEngine::GetDwordFromRegistry(L"ColorizationGlassReflectionOpacityInactive", active);
 		maximized = GlassEngine::GetDwordFromRegistry(L"ColorizationGlassReflectionOpacityMaximized", active);
@@ -489,9 +493,9 @@ void CustomThemeAtlasLoader::Update(GlassEngine::UpdateType type)
 		}
 		else if (active == 0xFFFFFFFF)
 		{
+			active = 90;
 			if (themeHandle)
 			{
-				active = 90;
 				CustomThemeAtlasLoader::MyGetThemeInt(themeHandle, static_cast<int>(DWM_WINDOW_THEME_PART::SQUEEGEREFLECTIONMAP), 1, TMT_OPACITY, reinterpret_cast<int*>(&active));
 			}
 		}
@@ -508,9 +512,9 @@ void CustomThemeAtlasLoader::Update(GlassEngine::UpdateType type)
 		}
 		else if (inactive == 0xFFFFFFFF)
 		{
+			inactive = 75;
 			if (themeHandle)
 			{
-				inactive = 75;
 				CustomThemeAtlasLoader::MyGetThemeInt(themeHandle, static_cast<int>(DWM_WINDOW_THEME_PART::SQUEEGEREFLECTIONMAP), 2, TMT_OPACITY, reinterpret_cast<int*>(&inactive));
 			}
 		}
@@ -527,9 +531,9 @@ void CustomThemeAtlasLoader::Update(GlassEngine::UpdateType type)
 		}
 		else if (maximized == 0xFFFFFFFF)
 		{
+			maximized = 90;
 			if (themeHandle)
 			{
-				maximized = 90;
 				CustomThemeAtlasLoader::MyGetThemeInt(themeHandle, static_cast<int>(DWM_WINDOW_THEME_PART::SQUEEGEREFLECTIONMAP), 3, TMT_OPACITY, reinterpret_cast<int*>(&maximized));
 			}
 		}
@@ -546,9 +550,9 @@ void CustomThemeAtlasLoader::Update(GlassEngine::UpdateType type)
 		}
 		else if (inactiveMaximized == 0xFFFFFFFF)
 		{
+			inactiveMaximized = 75;
 			if (themeHandle)
 			{
-				inactiveMaximized = 75;
 				CustomThemeAtlasLoader::MyGetThemeInt(themeHandle, static_cast<int>(DWM_WINDOW_THEME_PART::SQUEEGEREFLECTIONMAP), 4, TMT_OPACITY, reinterpret_cast<int*>(&inactiveMaximized));
 			}
 		}
@@ -559,6 +563,7 @@ void CustomThemeAtlasLoader::Update(GlassEngine::UpdateType type)
 		Shared::g_reflectionOpacityInactiveMaximized = std::clamp(static_cast<float>(inactiveMaximized) / 100.f, 0.f, 1.f);
 
 		active = 0, inactive = 0, maximized = 0, inactiveMaximized = 0;
+		// The same 0xFFFFFFFF theme sentinel applies here and to the base colors below.
 		active = GlassEngine::GetDwordFromRegistry(L"ColorizationOpacity", 0xFFFFFFFE);
 		inactive = GlassEngine::GetDwordFromRegistry(L"ColorizationOpacityInactive", active);
 		maximized = GlassEngine::GetDwordFromRegistry(L"ColorizationOpacityMaximized", active);
@@ -577,9 +582,9 @@ void CustomThemeAtlasLoader::Update(GlassEngine::UpdateType type)
 		}
 		else if (active == 0xFFFFFFFF)
 		{
+			active = 100;
 			if (themeHandle)
 			{
-				active = 100;
 				CustomThemeAtlasLoader::MyGetThemeInt(themeHandle, static_cast<int>(DWM_WINDOW_THEME_PART::TOPFRAME), 1, TMT_COLORIZATIONOPACITY, reinterpret_cast<int*>(&active));
 			}
 		}
@@ -596,9 +601,9 @@ void CustomThemeAtlasLoader::Update(GlassEngine::UpdateType type)
 		}
 		else if (inactive == 0xFFFFFFFF)
 		{
+			inactive = 40;
 			if (themeHandle)
 			{
-				inactive = 40;
 				CustomThemeAtlasLoader::MyGetThemeInt(themeHandle, static_cast<int>(DWM_WINDOW_THEME_PART::TOPFRAME), 2, TMT_COLORIZATIONOPACITY, reinterpret_cast<int*>(&inactive));
 			}
 		}
@@ -615,9 +620,9 @@ void CustomThemeAtlasLoader::Update(GlassEngine::UpdateType type)
 		}
 		else if (maximized == 0xFFFFFFFF)
 		{
+			maximized = 100;
 			if (themeHandle)
 			{
-				maximized = 100;
 				CustomThemeAtlasLoader::MyGetThemeInt(themeHandle, static_cast<int>(DWM_WINDOW_THEME_PART::TOPFRAME), 3, TMT_COLORIZATIONOPACITY, reinterpret_cast<int*>(&maximized));
 			}
 		}
@@ -634,9 +639,9 @@ void CustomThemeAtlasLoader::Update(GlassEngine::UpdateType type)
 		}
 		else if (inactiveMaximized == 0xFFFFFFFF)
 		{
+			inactiveMaximized = 40;
 			if (themeHandle)
 			{
-				inactiveMaximized = 40;
 				CustomThemeAtlasLoader::MyGetThemeInt(themeHandle, static_cast<int>(DWM_WINDOW_THEME_PART::TOPFRAME), 4, TMT_COLORIZATIONOPACITY, reinterpret_cast<int*>(&inactiveMaximized));
 			}
 		}
@@ -664,9 +669,9 @@ void CustomThemeAtlasLoader::Update(GlassEngine::UpdateType type)
 		}
 		else if (transparent == 0xFFFFFFFF)
 		{
+			transparent = 0x00000000;
 			if (themeHandle)
 			{
-				transparent = 0x00000000;
 				CustomThemeAtlasLoader::MyGetThemeInt(themeHandle, static_cast<int>(DWM_WINDOW_THEME_PART::TOPFRAME), 1, TMT_COLORIZATIONCOLOR, reinterpret_cast<int*>(&transparent));
 			}
 		}
@@ -683,9 +688,9 @@ void CustomThemeAtlasLoader::Update(GlassEngine::UpdateType type)
 		}
 		else if (maximized == 0xFFFFFFFF)
 		{
+			maximized = 0x00000000;
 			if (themeHandle)
 			{
-				maximized = 0x00000000;
 				CustomThemeAtlasLoader::MyGetThemeInt(themeHandle, static_cast<int>(DWM_WINDOW_THEME_PART::TOPFRAME), 3, TMT_COLORIZATIONCOLOR, reinterpret_cast<int*>(&maximized));
 			}
 		}
@@ -702,9 +707,9 @@ void CustomThemeAtlasLoader::Update(GlassEngine::UpdateType type)
 		}
 		else if (opaque == 0xFFFFFFFF)
 		{
+			opaque = 0xFFDFDFDF;
 			if (themeHandle)
 			{
-				opaque = 0xFFDFDFDF;
 				CustomThemeAtlasLoader::MyGetThemeInt(themeHandle, static_cast<int>(DWM_WINDOW_THEME_PART::COMMON), 0, TMT_COLORIZATIONCOLOR, reinterpret_cast<int*>(&opaque));
 			}
 		}
@@ -712,6 +717,18 @@ void CustomThemeAtlasLoader::Update(GlassEngine::UpdateType type)
 		Shared::g_colorizationBaseTransparent = Color::FromArgb(transparent, false);
 		Shared::g_colorizationBaseMaximized = Color::FromArgb(maximized, false);
 		Shared::g_colorizationBaseOpaque = Color::FromArgb(opaque, false);
+		StartupTrace::Write(
+			"colors: type=%u themeHandle=%p base transparent=%#08x maximized=%#08x opaque=%#08x opacity=%.2f/%.2f/%.2f/%.2f",
+			static_cast<unsigned>(Shared::g_type),
+			static_cast<void*>(themeHandle),
+			transparent,
+			maximized,
+			static_cast<unsigned>(opaque),
+			Shared::g_colorizationOpacity,
+			Shared::g_colorizationOpacityInactive,
+			Shared::g_colorizationOpacityMaximized,
+			Shared::g_colorizationOpacityInactiveMaximized
+		);
 	}
 }
 

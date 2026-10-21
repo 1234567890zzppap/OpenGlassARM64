@@ -219,7 +219,10 @@
       "requirement": "required",
       "kind": "raw",
       "type": "BYTE*",
-      "usage": "code_address"
+      "usage": "code_address",
+      "platforms": [
+        "x64"
+      ]
     },
     {
       "name": "Symbol_CRenderData_TryDrawCommandAsDrawList_Pre_22000",
@@ -239,7 +242,8 @@
       "requirement": "required",
       "kind": "raw",
       "type": "HRESULT (*)(CRenderData*, CDrawingContext*, CDrawListCache*, CDrawListEntryBuilder*, bool, UINT, DWM::span<const BYTE>*, bool*)",
-      "notes": "The PDB exposes gsl::span<const BYTE> by value. Win64 passes this 16-byte aggregate indirectly, so the detour models the lowered pointer while retaining the semantic element type."
+      "notes": "The PDB exposes gsl::span<const BYTE> by value. Win64 passes this 16-byte aggregate indirectly, so the detour models the lowered pointer while retaining the semantic element type.",
+      "arm64_type": "HRESULT (*)(CRenderData*, CDrawingContext*, CDrawListCache*, CDrawListEntryBuilder*, bool, UINT, DWM::span<const BYTE>, bool*)"
     },
     {
       "name": "Symbol_CRenderData_TryDrawCommandAsDrawList_22000",
@@ -259,7 +263,8 @@
       "requirement": "required",
       "kind": "raw",
       "type": "HRESULT (*)(CRenderData*, CDrawingContext*, CDrawListCache*, CDrawListEntryBuilder*, UINT, DWM::span<const BYTE>*, bool*)",
-      "notes": "The PDB exposes gsl::span<const BYTE> by value. Win64 passes this 16-byte aggregate indirectly, so the detour models the lowered pointer while retaining the semantic element type."
+      "notes": "The PDB exposes gsl::span<const BYTE> by value. Win64 passes this 16-byte aggregate indirectly, so the detour models the lowered pointer while retaining the semantic element type.",
+      "arm64_type": "HRESULT (*)(CRenderData*, CDrawingContext*, CDrawListCache*, CDrawListEntryBuilder*, UINT, DWM::span<const BYTE>, bool*)"
     },
     {
       "name": "Symbol_CRenderData_DrawImageResource_FillMode_Pre_19041",
@@ -643,7 +648,34 @@
       ],
       "requirement": "required",
       "target": "&CDrawingContext::FillShapeWithBrush",
-      "kind": "projected_function"
+      "kind": "projected_function",
+      "platforms": [
+        "x64"
+      ],
+      "notes": "ARM64 keeps its own build-scoped descriptor: 24H2 drops the out-of-line copy on ARM64 and inlines it into every caller."
+    },
+    {
+      "name": "Symbol_CDrawingContext_FillShapeWithBrush_Arm64",
+      "id": "CDrawingContext::FillShapeWithBrush.pre26100",
+      "bindings": [
+        {
+          "symbol_names": [
+            "public: long __cdecl CDrawingContext::FillShapeWithBrush(class CShape const & __ptr64,struct ID2D1Brush * __ptr64) __ptr64"
+          ],
+          "min_inclusive": null,
+          "max_exclusive": {
+            "build": 26100,
+            "revision": 0
+          }
+        }
+      ],
+      "kind": "projected_function",
+      "target": "&CDrawingContext::FillShapeWithBrush",
+      "requirement": "required",
+      "platforms": [
+        "arm64"
+      ],
+      "notes": "The 26100 ARM64 dwmcore no longer exports an out-of-line copy: the name is absent from the public symbols and every caller inlines it, so the descriptor is limited to 23H2. From 26100 the renderer switches to CDrawingContext::FillShapeWithSolidColor, which still exists there and drives the same device-context fill."
     },
     {
       "name": "Symbol_CDrawingContext_FlushD2D",

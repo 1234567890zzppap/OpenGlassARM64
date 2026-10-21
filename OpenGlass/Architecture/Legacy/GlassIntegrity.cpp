@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "StartupTrace.hpp"
 #include "HookHelper.hpp"
 #include "uDwmProjection.hpp"
 #include "dwmcoreProjection.hpp"
@@ -453,6 +454,13 @@ namespace OpenGlass::GlassIntegrity
 	};
 	uint8_t* g_COcclusionContext_MinimumOcclusionAreaBranch_PatchLocation = nullptr;
 	HookHelper::InstructionPatch g_COcclusionContext_MinimumOcclusionAreaBranch_Patch;
+	// Temporary: the first frames of a session are enough to see which branch the frame
+	// geometry takes and what the realized colors look like.
+	int g_arm64DrawGeometryTraceBudget = 64;
+#if defined(_M_ARM64)
+	// The AArch64 shortcut is a single conditional branch, so it needs its own patch object.
+	HookHelper::InstructionPatch g_arm64MinimumOcclusionAreaBranchPatch;
+#endif
 
 	void CaptureCollectedOcclusionRectangle(
 		dwmcore::COcclusionContext* occlusionContext,
@@ -934,8 +942,11 @@ HRESULT GlassIntegrity::MyCOcclusionContext_DrawGeometry(
 	const auto active = reinterpreter.GetIsActive();
 	const auto maximized = reinterpreter.GetIsMaximized();
 
+	GlassKernel::CRealizedGlassColorizationParameters realizedGlassColorizationParameters{};
+	const auto marker = color.a;
+	const char* branch = "none";
+
 	if (
-		GlassKernel::CRealizedGlassColorizationParameters realizedGlassColorizationParameters;
 		!valid ||
 		(
 			valid &&
@@ -958,6 +969,7 @@ HRESULT GlassIntegrity::MyCOcclusionContext_DrawGeometry(
 		)
 	)
 	{
+		branch = "solid";
 		UINT count{};
 		if (!geometryShape->IsRectangles(&count))
 		{
@@ -985,6 +997,7 @@ HRESULT GlassIntegrity::MyCOcclusionContext_DrawGeometry(
 		expansion
 	)
 	{
+		branch = "glass";
 		const auto occlusionContext = This->GetOcclusionContext();
 		if (const auto glassCoverageSet = CArrayBasedGlassCoverageSet::GetOrCreate(occlusionContext->GetArrayBasedCoverageSet(), true); glassCoverageSet)
 		{
@@ -1002,6 +1015,21 @@ HRESULT GlassIntegrity::MyCOcclusionContext_DrawGeometry(
 				);
 			}
 		}
+	}
+
+	if (g_arm64DrawGeometryTraceBudget)
+	{
+		--g_arm64DrawGeometryTraceBudget;
+		StartupTrace::Write(
+			"integrity: draw-geometry valid=%d active=%d maximized=%d expansion=%.3f marker=%#010x realizedAlpha=%.3f branch=%s",
+			valid ? 1 : 0,
+			active ? 1 : 0,
+			maximized ? 1 : 0,
+			expansion,
+			*reinterpret_cast<const DWORD*>(&marker),
+			realizedGlassColorizationParameters.color.a,
+			branch
+		);
 	}
 
 	return hr;
@@ -1849,6 +1877,64 @@ void GlassIntegrity::Startup()
 	}
 	if (hasInlinedMinimumOcclusionAreaBranch)
 	{
+#if defined(_M_ARM64)
+		// AArch64 form of the decision the x64 table below neutralises. The 26100 ARM64 dwmcore
+		// compares the minimum occlusion area stored at COcclusionContext+0x47C with the collected
+		// area and, when a second condition also holds, jumps straight to the early-return path.
+		// That is what leaves the frames of overlapping and extended-frame windows undrawn. The
+		// x64 patch nops the comparison's conditional jump; here the equivalent is the CBZ right
+		// after the "do not skip" flag, so the collection always continues.
+		//   ldr  s16,[x21,#0x47C]     ; threshold
+		//   fcpe s20,s16              ; collected area against it
+		//   b.lt <second term>        ; area below the threshold
+		//   mov  w8,#1                ; not skipped
+		//   cbz  w8,<early return>    ; <- patched to nop
+		const auto preSubgraph = reinterpret_cast<const uint8_t*>(
+			dwmcore::Symbol_COcclusionContext_PreSubgraph_26100_Pre_3624.get()
+		);
+		constexpr size_t searchLength = 0x2000;
+		constexpr uint32_t thresholdLoad = 0xBD447EB0u;    // ldr  s16,[x21,#0x47C]
+		constexpr uint32_t thresholdCompare = 0x1E302290u; // fcpe s20,s16
+		constexpr uint32_t notSkippedFlag = 0x52800028u;   // mov  w8,#1
+		uint8_t* branchAddress = nullptr;
+		size_t matches = 0;
+		for (size_t offset = 0; offset + 5 * sizeof(uint32_t) <= searchLength; offset += sizeof(uint32_t))
+		{
+			uint32_t words[5]{};
+			memcpy(words, preSubgraph + offset, sizeof(words));
+			if (words[0] != thresholdLoad || words[1] != thresholdCompare || words[3] != notSkippedFlag)
+			{
+				continue;
+			}
+			// b.lt is the condition code 0xB; the taken target moves with the build.
+			if ((words[2] & 0xFF000010u) != 0x54000000u || (words[2] & 0xFu) != 0xBu)
+			{
+				continue;
+			}
+			// cbz w8,<early return>: 32-bit compare-and-branch on W8.
+			if ((words[4] & 0x7F000000u) != 0x34000000u || (words[4] & 0x1Fu) != 8u)
+			{
+				continue;
+			}
+			branchAddress = const_cast<uint8_t*>(preSubgraph + offset + 4 * sizeof(uint32_t));
+			matches++;
+		}
+		if (matches == 1 && branchAddress)
+		{
+			static constexpr std::array<uint8_t, 4> nopBranch{ 0x1F, 0x20, 0x03, 0xD5 };
+			std::array<uint8_t, 4> originalBranch{};
+			memcpy(originalBranch.data(), branchAddress, originalBranch.size());
+			StartupTrace::Write("integrity: neutralising the minimum occlusion-area shortcut at %p", branchAddress);
+			g_arm64MinimumOcclusionAreaBranchPatch.Prepare(branchAddress, originalBranch, nopBranch);
+			HookHelper::GetCurrentHookTransaction().Apply(g_arm64MinimumOcclusionAreaBranchPatch);
+		}
+		else
+		{
+			// The shortcut stays in place, which costs frame rendering on overlapping windows but
+			// keeps the process alive; the log records why.
+			StartupTrace::Write("integrity: minimum occlusion-area shortcut matched %zu site(s), leaving it in place", matches);
+		}
+#else
 		const auto preSubgraph = reinterpret_cast<const uint8_t*>(
 			dwmcore::Symbol_COcclusionContext_PreSubgraph_26100_Pre_3624.get()
 		);
@@ -1878,6 +1964,7 @@ void GlassIntegrity::Startup()
 			g_COcclusionContext_MinimumOcclusionAreaBranch_PatchedInstructions
 		);
 		HookHelper::GetCurrentHookTransaction().Apply(g_COcclusionContext_MinimumOcclusionAreaBranch_Patch);
+#endif
 	}
 
 	HookHelper::ApplyInlineHooks(

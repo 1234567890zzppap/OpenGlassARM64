@@ -1190,7 +1190,34 @@
       "requirement": "required",
       "kind": "raw",
       "type": "BYTE*",
-      "usage": "code_address"
+      "usage": "code_address",
+      "platforms": [
+        "x64"
+      ]
+    },
+    {
+      "name": "Symbol_CTopLevelWindow_UpdateWindowVisuals_ForcedHighContrast",
+      "id": "CTopLevelWindow::UpdateWindowVisuals.forcedHighContrast",
+      "bindings": [
+        {
+          "symbol_names": [
+            "private: long __cdecl CTopLevelWindow::UpdateWindowVisuals(void) __ptr64"
+          ],
+          "min_inclusive": {
+            "build": 22000,
+            "revision": 0
+          },
+          "max_exclusive": null
+        }
+      ],
+      "kind": "raw",
+      "type": "BYTE*",
+      "usage": "code_address",
+      "requirement": "optional",
+      "platforms": [
+        "arm64"
+      ],
+      "notes": "ARM64 anchor for the x64 inlined high-contrast patch. ARM64 UpdateWindowVisuals reads CDesktopManager::IsHighContrastMode inline twice instead of calling it: once to clear a rect and skip the modern background block, once to capture a bool consumed by the later border and background code. Verified on the 22631 ARM64 binary: forcing only the captured-bool branch produces the legacy background fill; forcing the rect-clear branch removes that fill again, and faking the flag for the whole call also reaches GetRoundedBorderColor and the border brush setup, which paints a black ring and adds a border under borderless themes. Forcing that branch alone is not enough: the same high-contrast block keeps the (part - 0x12) <= 3 shadow-part test that x64 also forces out of range, and an unforced test sends the shadow NC area parts down their special path, which drops the window drop shadow. Both decisions are forced here because the search window is anchored on this function; the shadow-part site is the only (value - 0x12) <= 3 comparison followed by b.hi inside it, and the branch is re-encoded as an unconditional branch to its own target. Verified on the same 22631 ARM64 build: restoring the second forced decision brought the shadow back with the modern border disabled. The predicates are matched by byte pattern, so a recompiled uDWM fails the match instead of corrupting code."
     },
     {
       "name": "Symbol_CTopLevelWindow__CTopLevelWindow",
@@ -1227,7 +1254,10 @@
       "requirement": "required",
       "kind": "raw",
       "type": "BYTE*",
-      "usage": "code_address"
+      "usage": "code_address",
+      "platforms": [
+        "x64"
+      ]
     },
     {
       "name": "Symbol_CTopLevelWindow_CreateBitmapFromAtlas",
@@ -1466,7 +1496,56 @@
       ],
       "requirement": "required",
       "target": "&CWindowList::GetWindowListForDesktop",
-      "kind": "projected_function"
+      "kind": "projected_function",
+      "platforms": [
+        "x64"
+      ]
+    },
+    {
+      "name": "Symbol_CWindowList_GetWindowListForDesktop_Arm64",
+      "id": "CWindowList::GetWindowListForDesktop.26100",
+      "bindings": [
+        {
+          "symbol_names": [
+            "public: struct _LIST_ENTRY * __ptr64 __cdecl CWindowList::GetWindowListForDesktop(unsigned __int64) __ptr64"
+          ],
+          "min_inclusive": {
+            "build": 26100,
+            "revision": 0
+          },
+          "max_exclusive": null
+        }
+      ],
+      "kind": "raw",
+      "type": "PRLIST_ENTRY (*)(CWindowList*, ULONG_PTR)",
+      "requirement": "required",
+      "platforms": [
+        "arm64"
+      ],
+      "notes": "Windows 11 24H2 exports CWindowList::GetWindowListForDesktop on ARM64 again, so the desktop window-list map lookup is only needed on 23H2. Verified against the 26100 ARM64 uDWM public symbols; 23H2 has no such name and keeps inlined copies only."
+    },
+    {
+      "name": "Symbol_CWindowList_DesktopWindowListMap_FindElement",
+      "id": "CWindowList::DesktopWindowListMap.FindElement",
+      "bindings": [
+        {
+          "symbol_names": [
+            "public: struct CWindowList::DESKTOP_WINDOWLIST_MAP_ENTRY * __ptr64 __cdecl CGenericTableMap<unsigned __int64,struct CWindowList::DESKTOP_WINDOWLIST_MAP_ENTRY>::FindElement(unsigned __int64) __ptr64"
+          ],
+          "min_inclusive": null,
+          "max_exclusive": {
+            "build": 26100,
+            "revision": 0
+          }
+        }
+      ],
+      "kind": "raw",
+      "type": "DESKTOP_WINDOWLIST_MAP_ENTRY* (*)(DesktopWindowListMap*, ULONG_PTR)",
+      "requirement": "required",
+      "platforms": [
+        "arm64"
+      ],
+      "notes": "ARM64 uDWM exposes CWindowList::GetWindowListForDesktop only as inlined copies; this desktop-map lookup is the equivalent entry point. Verified on 22631 ARM64 from CWindowList::StyleChange: the map sits at CWindowList+sizeof(PVOID) and the list head at entry+10*sizeof(PVOID). Windows 11 24H2 exports CWindowList::GetWindowListForDesktop on ARM64 again and drops this helper, so the substitution is limited to 23H2 and earlier."
     },
     {
       "name": "Symbol_CDesktopManager_s_pDesktopManagerInstance",
@@ -1518,7 +1597,10 @@
       "requirement": "required",
       "kind": "raw",
       "type": "BYTE*",
-      "usage": "code_address"
+      "usage": "code_address",
+      "platforms": [
+        "x64"
+      ]
     },
     {
       "name": "Symbol_CDesktopManager_ReleaseDXGIAdapter",
@@ -3951,6 +4033,38 @@
         }
       ],
       "notes": "CDesktopManager::Initialize / CLivePreview::_FadeOutToGlass\n*((QWORD *)CDesktopManager::s_pDesktopManagerInstance + N) → CWindowList*"
+    },
+    {
+      "name": "CWindowList_DesktopWindowListMap",
+      "id": "CWindowList.DesktopWindowListMap",
+      "kind": "field",
+      "type": "DesktopWindowListMap",
+      "cases": [
+        {
+          "offset": "sizeof(PVOID)",
+          "otherwise": true
+        }
+      ],
+      "platforms": [
+        "arm64"
+      ],
+      "notes": "Verified on 22631 ARM64: CWindowList::StyleChange passes this address to the desktop-map lookup."
+    },
+    {
+      "name": "CWindowList_DESKTOP_WINDOWLIST_MAP_ENTRY_RList",
+      "id": "CWindowList.DESKTOP_WINDOWLIST_MAP_ENTRY.RList",
+      "kind": "field",
+      "type": "_LIST_ENTRY",
+      "cases": [
+        {
+          "offset": "10 * (LONGLONG)sizeof(PVOID)",
+          "otherwise": true
+        }
+      ],
+      "platforms": [
+        "arm64"
+      ],
+      "notes": "Verified on 22631 ARM64: the same entry offset the x64 GetWindowListForDesktop uses."
     },
     {
       "name": "CDesktopManager_GetWICFactory_Index",

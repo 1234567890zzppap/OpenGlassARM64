@@ -4,6 +4,7 @@
     <BuildType Name="Release" />
     <BuildType Name="ReleaseSigned" />
     <Platform Name="x64" />
+    <Platform Name="ARM64" />
   </Configurations>
   <Project Path="Common/Common.vcxitems" Id="9d3a67c5-e5ca-42ae-8b06-491c60e86ebe" />
   <Project Path="OpenGlass/OpenGlass.Shared.vcxitems" Id="7d0401b4-2563-4c44-aef7-7dc75b21bc7e" />

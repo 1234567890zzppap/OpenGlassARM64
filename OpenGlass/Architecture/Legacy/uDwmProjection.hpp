@@ -1222,11 +1222,19 @@ namespace OpenGlass::uDWM
 	};
 	struct CWindowList : CBaseObject
 	{
+#if defined(_M_ARM64)
+		// ARM64 uDWM only keeps GetWindowListForDesktop as inlined copies, so the
+		// equivalent desktop-map lookup lives in GlassKernel.cpp where the projected
+		// Symbol handles are visible: CGenericTableMap<unsigned __int64,
+		// CWindowList::DESKTOP_WINDOWLIST_MAP_ENTRY>::FindElement.
+		PRLIST_ENTRY GetWindowListForDesktop(ULONG_PTR desktopID);
+#else
 		inline PRLIST_ENTRY GetWindowListForDesktop(ULONG_PTR desktopID)
 		{
 			OPENGLASS_MUSTTAIL
 			return Projection::Invoke<&CWindowList::GetWindowListForDesktop>(this, desktopID);
 		}
+#endif
 	};
 
 	struct CCompositor

@@ -9,8 +9,17 @@ The required top-level `known_builds` list records the build families a module e
 To generate this architecture into the default x64 Release intermediate directory, run the generator from the repository root:
 
 ```powershell
-python Scripts/projection_codegen.py --repo . --architecture milcomp --output Cache\OpenGlass.MILComp\x64\Release\Generated\Projection
+python Scripts/projection_codegen.py --repo . --architecture milcomp --platform x64 --output Cache\OpenGlass.MILComp\x64\Release\Generated\Projection
 ```
+
+## CPU platforms
+
+The optional `platforms` array on a Symbol or Layout accepts `x64` and `arm64` (the `AMD64` and `ARM64EC` spellings normalize onto them); an entry without it applies to both, and the project files pass `--platform $(Platform)` while building only `x64` and `ARM64`. A binding may carry `arm64_symbol_names` to replace `symbol_names` on ARM64, and a Symbol may carry `arm64_type` to replace `type`.
+
+MILComp has no audited ARM64 DWM binary for build 28000+, so the ARM64 inventory here stays deliberately minimal and mirrors only what the shared helper code needs:
+
+- `CWindowList::GetWindowListForDesktop` is x64-only for the same reason as in Legacy, and `GlassKernel.cpp` reimplements it from `CGenericTableMap<unsigned __int64, CWindowList::DESKTOP_WINDOWLIST_MAP_ENTRY>::FindElement` plus the two `CWindowList` Layouts.
+- `CTopLevelWindow::UpdateWindowVisuals`, `CDesktopManager::IsHighContrastMode`, and `CTopLevelWindow::IsShadowNCAreaPart` are x64-only, so the frame-demodernizer feature that patches them stays entirely off on ARM64 rather than installing a partial patch set; an incomplete set previously terminated dwm.exe through FailFast. Do not enable it until an ARM64 28000+ binary has been audited.
 
 Add `--check` to validate without writing files. Generated C++ belongs under `$(IntDir)` and must not be committed. Runtime metadata lives in naturally aligned, startup-only tables. After Layout selection, normal `read/ref/address` access is a direct offset load plus address arithmetic, with no registry lookup or version scan.
 

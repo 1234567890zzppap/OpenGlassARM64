@@ -194,6 +194,15 @@ void GlassFrameDemodernizer::Update(GlassEngine::UpdateType type)
 
 void GlassFrameDemodernizer::Startup()
 {
+#if defined(_M_ARM64)
+	// This feature forces inlined uDWM decisions by rewriting x64 instruction bytes that it
+	// finds by scanning CTopLevelWindow::UpdateWindowVisuals, and it anchors on
+	// CTopLevelWindow::IsShadowNCAreaPart, which ARM64 uDWM does not export. No ARM64 DWM
+	// binary for the build 28000+ MILComp architecture has been audited, and an incomplete
+	// patch set previously terminated dwm.exe through FailFast, so the whole feature stays
+	// off on ARM64 until such a binary can be verified.
+	return;
+#else
 
 	auto CTopLevelWindow_UpdateWindowVisuals_Instructions =
 		static_cast<UCHAR*>(Util::force_cast_from(uDWM::Symbol_CTopLevelWindow_UpdateWindowVisuals.get()));
@@ -307,10 +316,15 @@ void GlassFrameDemodernizer::Startup()
 			{ &g_SetMargin_Org },
 		}
 	);
+#endif
 }
 
 void GlassFrameDemodernizer::Shutdown()
 {
+#if defined(_M_ARM64)
+	// Startup installs nothing on ARM64, so there is nothing to remove.
+	return;
+#else
 	HookHelper::ApplyInlineHooks(
 		std::initializer_list<HookHelper::DetourInfo>
 		{
@@ -324,6 +338,7 @@ void GlassFrameDemodernizer::Shutdown()
 	{
 		HookHelper::GetCurrentHookTransaction().Apply(patch);
 	}
+#endif
 }
 
 void GlassFrameDemodernizer::Cleanup()

@@ -76,11 +76,38 @@ HRESULT GlassKernel::MyCGraphicsDeviceManager_ReleaseGraphicsDevice(uDWM::CGraph
 	return g_CGraphicsDeviceManager_ReleaseGraphicsDevice_Org(This);
 }
 
+namespace OpenGlass::uDWM
+{
+#if defined(_M_ARM64)
+	PRLIST_ENTRY CWindowList::GetWindowListForDesktop(ULONG_PTR desktopID)
+	{
+		if (g_versionInfo.build < os::build_w11_21h2) [[unlikely]]
+		{
+			// The desktop-window-list map Layout is only verified from Windows 11 on
+			// ARM64, so older ARM64 builds stay unsupported instead of guessed.
+			return nullptr;
+		}
+		const auto findElement = Symbol_CWindowList_DesktopWindowListMap_FindElement.get();
+		const auto entry = findElement(
+			CWindowList_DesktopWindowListMap.address(this),
+			desktopID
+		);
+		return entry ? CWindowList_DESKTOP_WINDOWLIST_MAP_ENTRY_RList.address(entry) : nullptr;
+	}
+#endif
+}
+
 void GlassKernel::RedrawAllTopLevelWindow(bool deepRedraw)
 {
 	ULONG_PTR desktopID{ 0 };
 	Util::GetDesktopID(1, &desktopID);
 	const auto windowList = uDWM::CDesktopManager::GetInstance()->GetWindowList()->GetWindowListForDesktop(desktopID);
+	if (!windowList) [[unlikely]]
+	{
+		// ARM64 reaches this path through the desktop-map lookup, which reports an
+		// unknown desktop directly instead of returning a sentinel list.
+		return;
+	}
 	for (auto i = windowList->Blink; i != windowList; i = i->Blink)
 	{
 		RedrawTopLevelWindow(

@@ -747,9 +747,11 @@ namespace OpenGlass
 		{
 			wxBoxSizer* row = new wxBoxSizer(wxHORIZONTAL);
 			m_chkEnableTransparency = new wxCheckBox(panel, wxID_ANY, L"Enable transparency");
-			if (m_systemTransparency) m_chkEnableTransparency->SetToolTip(L"Windows transparency effects for the current user.");
+			m_chkEnableTransparency->SetToolTip(
+				L"OpenGlass opaque blend. The glass effect also requires Windows transparency effects to be on."
+			);
 			row->Add(m_chkEnableTransparency, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
-			if (!m_systemTransparency) AddOptionStatus(panel, row, Settings::Id::ColorizationOpaqueBlend);
+			AddOptionStatus(panel, row, Settings::Id::ColorizationOpaqueBlend);
 			sizer->Add(row, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 8);
 		}
 		{

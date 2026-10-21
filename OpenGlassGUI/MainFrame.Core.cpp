@@ -1676,20 +1676,14 @@ namespace OpenGlass
 		m_chkEnableTransparency->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent& e) {
 			RunPreview([&]
 			{
-				if (m_systemTransparency)
-				{
-					if ((m_userConfig->GetDword(L"EnableTransparency", 0) != 0) != e.IsChecked())
-					{
-						TrackSettingChange(Settings::Scope::User, Settings::Id::EnableTransparency);
-						THROW_IF_FAILED(m_userConfig->SetDword(L"EnableTransparency", e.IsChecked()));
-					}
-				}
-				else
-				{
-					TrackSettingChange(Settings::Id::ColorizationOpaqueBlend);
-					if (e.IsChecked()) THROW_IF_FAILED(m_config->DeleteValue(L"ColorizationOpaqueBlend"));
-					else THROW_IF_FAILED(m_config->SetDword(L"ColorizationOpaqueBlend", 1));
-				}
+				// OpenGlass decides transparency from ColorizationOpaqueBlend, so this
+				// checkbox always maintains that value. Mirroring the Windows preference
+				// into the DWM key instead has no reader and leaves a stale opaque blend
+				// in place, which keeps every window opaque even when Windows
+				// transparency is on.
+				TrackSettingChange(Settings::Id::ColorizationOpaqueBlend);
+				if (e.IsChecked()) THROW_IF_FAILED(m_config->DeleteValue(L"ColorizationOpaqueBlend"));
+				else THROW_IF_FAILED(m_config->SetDword(L"ColorizationOpaqueBlend", 1));
 				if (m_rbGlassType->GetSelection() == 1)
 					ApplyColorizationBalances(ColorizationPresets::CalculateIntensityAlpha(m_slColorIntensity->GetValue()) << 24);
 			}, Settings::UpdateType::Backdrop);

@@ -18,6 +18,17 @@ UINT32_MAX = 0xFFFFFFFF
 COMPLETE_NAME_CAPACITY = 64 * 1024
 MODULES = ("udwm", "dwmcore")
 ARCHITECTURES = {"legacy": "Legacy", "milcomp": "MILComp"}
+# CPU architectures that own their own exact-name set. dwm.exe on ARM64 is a
+# native ARM64 image, so its PDBs are the only valid name source for it.
+PLATFORMS = ("x64", "arm64")
+PLATFORM_ALIASES = {
+	"x64": "x64",
+	"amd64": "x64",
+	"x86_64": "x64",
+	"arm64": "arm64",
+	"arm64ec": "arm64",
+	"aarch64": "arm64",
+}
 REQUIREMENTS = {"required", "optional"}
 SYMBOL_KINDS = {"raw", "projected_function", "projected_variable"}
 ABI_COMPATIBILITIES = {"discard_return", "extra_trailing_argument"}
@@ -41,6 +52,7 @@ class SymbolBinding(TypedDict):
     symbol_names: list[str]
     min_inclusive: SymbolVersion | None
     max_exclusive: SymbolVersion | None
+    arm64_symbol_names: NotRequired[list[str]]
 
 class LayoutBoundary(TypedDict):
     build: str
@@ -60,6 +72,7 @@ class Symbol(TypedDict):
     kind: Literal["raw", "projected_function", "projected_variable"]
     requirement: Literal["required", "optional"]
     type: NotRequired[str]
+    arm64_type: NotRequired[str]
     target: NotRequired[str]
     fallback: NotRequired[str]
     condition: NotRequired[Literal["debug"]]
@@ -67,6 +80,7 @@ class Symbol(TypedDict):
     usage: NotRequired[Literal["code_address"]]
     notes: NotRequired[str]
     abi_compatibility: NotRequired[Literal["discard_return", "extra_trailing_argument"]]
+    platforms: NotRequired[list[str]]
 
 
 class Layout(TypedDict):
@@ -76,6 +90,7 @@ class Layout(TypedDict):
     type: str
     cases: list[LayoutCase]
     notes: NotRequired[str]
+    platforms: NotRequired[list[str]]
 
 
 class ProjectionSchema(TypedDict):
@@ -95,6 +110,86 @@ class ProjectionSchema(TypedDict):
 class Version:
     build: int = 0
     revision: int = 0
+
+
+def normalize_platform(value: str) -> str:
+    """Map an MSBuild platform or triplet name to a supported name set."""
+    normalized = PLATFORM_ALIASES.get(str(value).strip().lower())
+    if normalized is None:
+        raise SchemaError(f"unsupported platform: {value}")
+    return normalized
+
+
+def binding_symbol_names(binding: SymbolBinding, platform: str) -> list[str]:
+    """Return the exact complete names a binding contributes on one platform."""
+    if platform == "arm64":
+        arm64_names = binding.get("arm64_symbol_names")
+        if arm64_names:
+            return arm64_names
+    return binding["symbol_names"]
+
+
+def symbol_platforms(symbol: Symbol) -> tuple[str, ...]:
+    """Return the platforms on which one logical symbol participates at all.
+
+    dwm.exe resolves symbols from the PDB of its own CPU architecture, and a few
+    DWM helpers only survive as inlined copies on one architecture. A symbol that
+    is absent from an architecture's PDB cannot be a Required prerequisite there,
+    so schemas must declare the platforms that actually expose it.
+    """
+    declared = symbol.get("platforms")
+    if not declared:
+        return PLATFORMS
+    return tuple(declared)
+
+
+def symbol_type(symbol: Symbol, platform: str) -> str | None:
+    """Return the C++ type that models this symbol's ABI on one platform.
+
+    x64 lowers non-trivial aggregates to hidden references; ARM64 passes them in
+    registers and returns small homogeneous aggregates in vector registers, so the
+    same mangled function can need a different C++ type per platform.
+    """
+    if platform == "arm64":
+        arm64_type = symbol.get("arm64_type")
+        if arm64_type:
+            return arm64_type
+    return symbol.get("type")
+
+
+def platform_symbols(schema: ProjectionSchema, platform: str) -> list[Symbol]:
+    """Return the symbols one platform build actually owns, in registry order."""
+    return [symbol for symbol in schema["symbols"] if platform in symbol_platforms(symbol)]
+
+
+def layout_platforms(layout: Layout) -> tuple[str, ...]:
+    """Return the platforms whose build actually reads one projected Layout."""
+    declared = layout.get("platforms")
+    if not declared:
+        return PLATFORMS
+    return tuple(declared)
+
+
+def platform_layouts(schema: ProjectionSchema, platform: str) -> list[Layout]:
+    """Return the Layouts one platform build actually owns, in registry order."""
+    return [layout for layout in schema["layouts"] if platform in layout_platforms(layout)]
+
+
+def _normalize_platforms(item: dict[str, Any], context: str) -> None:
+    """Validate and canonicalize an optional "platforms" restriction."""
+    if "platforms" not in item:
+        return
+    platforms_context = f"{context}.platforms"
+    raw_platforms = require_list(item["platforms"], platforms_context)
+    if not raw_platforms:
+        raise SchemaError(f"{platforms_context} must not be empty")
+    checked = [
+        normalize_platform(require_string(value, f"{platforms_context}[{index}]"))
+        for index, value in enumerate(raw_platforms)
+    ]
+    if len(set(checked)) != len(checked):
+        raise SchemaError(f"{platforms_context} contains a duplicate platform")
+    item["platforms"] = [platform for platform in PLATFORMS if platform in checked]
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -224,7 +319,7 @@ def version_key(value: Any) -> tuple[int, int]:
 
 
 def _validate_symbol_binding(item: dict[str, Any], context: str) -> tuple[Version, Version]:
-    allowed = {"symbol_names", "min_inclusive", "max_exclusive"}
+    allowed = {"symbol_names", "min_inclusive", "max_exclusive", "arm64_symbol_names"}
     extra = set(item) - allowed
     if extra:
         raise SchemaError(f"{context} has unknown fields: {', '.join(sorted(extra))}")
@@ -239,6 +334,20 @@ def _validate_symbol_binding(item: dict[str, Any], context: str) -> tuple[Versio
     if len(set(checked_candidates)) != len(checked_candidates):
         raise SchemaError(f"{context}.symbol_names contains a duplicate candidate")
 
+    if "arm64_symbol_names" in item:
+        arm64_context = f"{context}.arm64_symbol_names"
+        arm64_candidates = require_list(item["arm64_symbol_names"], arm64_context)
+        if not arm64_candidates:
+            raise SchemaError(f"{arm64_context} must not be empty")
+        checked_arm64 = [
+            require_symbol_name(candidate, f"{arm64_context}[{index}]")
+            for index, candidate in enumerate(arm64_candidates)
+        ]
+        if len(set(checked_arm64)) != len(checked_arm64):
+            raise SchemaError(f"{arm64_context} contains a duplicate candidate")
+        if checked_arm64 == checked_candidates:
+            raise SchemaError(f"{arm64_context} must differ from symbol_names")
+
     minimum = parse_version(item.get("min_inclusive"), f"{context}.min_inclusive")
     maximum = parse_version(item.get("max_exclusive"), f"{context}.max_exclusive")
     if maximum.build and not minimum < maximum:
@@ -248,8 +357,9 @@ def _validate_symbol_binding(item: dict[str, Any], context: str) -> tuple[Versio
 
 def _validate_symbol(item: dict[str, Any], context: str) -> list[tuple[Version, Version]]:
     allowed = {
-        "name", "id", "bindings", "kind", "type", "target", "requirement",
+        "name", "id", "bindings", "kind", "type", "arm64_type", "target", "requirement",
         "fallback", "condition", "diagnostic_only", "usage", "notes", "abi_compatibility",
+        "platforms",
     }
     extra = set(item) - allowed
     if extra:
@@ -258,6 +368,7 @@ def _validate_symbol(item: dict[str, Any], context: str) -> list[tuple[Version, 
     require_optional_note(item.get("notes"), f"{context}.notes")
     require_string(item.get("name"), f"{context}.name", identifier=True)
     require_string(item.get("id"), f"{context}.id")
+    _normalize_platforms(item, context)
     raw_bindings = require_list(item.get("bindings"), f"{context}.bindings")
     if not raw_bindings:
         raise SchemaError(f"{context}.bindings must not be empty")
@@ -285,6 +396,15 @@ def _validate_symbol(item: dict[str, Any], context: str) -> list[tuple[Version, 
         usage = item.get("usage")
         if raw_type in {"PVOID", "void*", "LPVOID"}:
             raise SchemaError(f"{context}.type must preserve the raw symbol's typed ABI")
+        if "arm64_type" in item:
+            arm64_context = f"{context}.arm64_type"
+            arm64_type = require_string(item["arm64_type"], arm64_context)
+            if arm64_type in {"PVOID", "void*", "LPVOID"}:
+                raise SchemaError(f"{arm64_context} must preserve the raw symbol's typed ABI")
+            if arm64_type == raw_type:
+                raise SchemaError(f"{arm64_context} must differ from type")
+            if usage == "code_address" and arm64_type != "BYTE*":
+                raise SchemaError(f"{arm64_context}: code_address raw symbols must use BYTE*")
         if usage not in (None, "code_address"):
             raise SchemaError(f"{context}.usage only supports code_address")
         if raw_type == "BYTE*" and usage != "code_address":
@@ -332,10 +452,10 @@ def _validate_symbol(item: dict[str, Any], context: str) -> list[tuple[Version, 
 def _validate_symbols(path: Path, raw_symbols: Any) -> list[Symbol]:
     symbols = require_list(raw_symbols, f"{path}: symbols")
     symbol_handles: set[str] = set()
-    ranges_by_id: dict[str, list[tuple[Version, Version, str]]] = {}
-    ranges_by_candidate: dict[str, list[tuple[Version, Version, str]]] = {}
-    ranges_by_function_target: dict[str, list[tuple[Version, Version, str, str | None]]] = {}
-    ranges_by_variable_target: dict[str, list[tuple[Version, Version, str]]] = {}
+    ranges_by_id: dict[tuple[str, str], list[tuple[Version, Version, str]]] = {}
+    ranges_by_candidate: dict[tuple[str, str], list[tuple[Version, Version, str]]] = {}
+    ranges_by_function_target: dict[tuple[str, str], list[tuple[Version, Version, str, str | None]]] = {}
+    ranges_by_variable_target: dict[tuple[str, str], list[tuple[Version, Version, str]]] = {}
 
     for index, raw in enumerate(symbols):
         context = f"{path}: symbols[{index}]"
@@ -344,41 +464,48 @@ def _validate_symbols(path: Path, raw_symbols: Any) -> list[Symbol]:
         name = cast(str, item["name"])
         stable_id = cast(str, item["id"])
         kind = cast(str, item["kind"])
+        platforms = symbol_platforms(cast(Symbol, item))
 
         if name in symbol_handles:
             raise SchemaError(f"{context}: duplicate C++ handle name {name}")
         symbol_handles.add(name)
 
-        for minimum, maximum in ranges:
-            for prior_min, prior_max, prior_name in ranges_by_id.setdefault(stable_id, []):
-                if ranges_overlap((minimum, maximum), (prior_min, prior_max)):
-                    raise SchemaError(f"{context}: stable ID range overlaps {prior_name}")
-            ranges_by_id[stable_id].append((minimum, maximum, name))
+        for platform in platforms:
+            for minimum, maximum in ranges:
+                for prior_min, prior_max, prior_name in ranges_by_id.setdefault((stable_id, platform), []):
+                    if ranges_overlap((minimum, maximum), (prior_min, prior_max)):
+                        raise SchemaError(f"{context}: stable ID range overlaps {prior_name} on {platform}")
+                ranges_by_id[(stable_id, platform)].append((minimum, maximum, name))
 
-            if kind == "projected_function":
-                target = normalize_target(cast(str, item["target"]))
-                fallback = cast(str | None, item.get("fallback"))
-                for prior_min, prior_max, prior_name, prior_fallback in ranges_by_function_target.setdefault(target, []):
-                    if ranges_overlap((minimum, maximum), (prior_min, prior_max)):
-                        raise SchemaError(f"{context}: projected target range overlaps {prior_name}")
-                    if fallback != prior_fallback:
-                        raise SchemaError(f"{context}: projected target variants must use the same fallback")
-                ranges_by_function_target[target].append((minimum, maximum, name, fallback))
-            elif kind == "projected_variable":
-                target = normalize_target(cast(str, item["target"]))
-                for prior_min, prior_max, prior_name in ranges_by_variable_target.setdefault(target, []):
-                    if ranges_overlap((minimum, maximum), (prior_min, prior_max)):
-                        raise SchemaError(f"{context}: projected variable target range overlaps {prior_name}")
-                ranges_by_variable_target[target].append((minimum, maximum, name))
+                if kind == "projected_function":
+                    target = normalize_target(cast(str, item["target"]))
+                    fallback = cast(str | None, item.get("fallback"))
+                    key = (target, platform)
+                    for prior_min, prior_max, prior_name, prior_fallback in ranges_by_function_target.setdefault(key, []):
+                        if ranges_overlap((minimum, maximum), (prior_min, prior_max)):
+                            raise SchemaError(f"{context}: projected target range overlaps {prior_name} on {platform}")
+                        if fallback != prior_fallback:
+                            raise SchemaError(f"{context}: projected target variants must use the same fallback")
+                    ranges_by_function_target[key].append((minimum, maximum, name, fallback))
+                elif kind == "projected_variable":
+                    target = normalize_target(cast(str, item["target"]))
+                    key = (target, platform)
+                    for prior_min, prior_max, prior_name in ranges_by_variable_target.setdefault(key, []):
+                        if ranges_overlap((minimum, maximum), (prior_min, prior_max)):
+                            raise SchemaError(f"{context}: projected variable target range overlaps {prior_name}")
+                    ranges_by_variable_target[key].append((minimum, maximum, name))
 
         for binding, (minimum, maximum) in zip(cast(list[SymbolBinding], item["bindings"]), ranges):
-            for candidate in binding["symbol_names"]:
-                for prior_min, prior_max, prior_name in ranges_by_candidate.setdefault(candidate, []):
-                    if ranges_overlap((minimum, maximum), (prior_min, prior_max)):
-                        raise SchemaError(
-                            f"{context}: complete symbol name overlaps descriptor {prior_name}: {candidate}"
-                        )
-                ranges_by_candidate[candidate].append((minimum, maximum, name))
+            for platform in platforms:
+                for candidate in binding_symbol_names(binding, platform):
+                    key = (platform, candidate)
+                    for prior_min, prior_max, prior_name in ranges_by_candidate.setdefault(key, []):
+                        if ranges_overlap((minimum, maximum), (prior_min, prior_max)):
+                            raise SchemaError(
+                                f"{context}: complete symbol name overlaps descriptor {prior_name} "
+                                f"for {platform}: {candidate}"
+                            )
+                    ranges_by_candidate[key].append((minimum, maximum, name))
 
     return cast(list[Symbol], sorted(
         symbols,
@@ -387,13 +514,14 @@ def _validate_symbols(path: Path, raw_symbols: Any) -> list[Symbol]:
 
 
 def _validate_layout(item: dict[str, Any], context: str, constants: dict[str, int]) -> None:
-    allowed = {"name", "id", "kind", "type", "cases", "notes"}
+    allowed = {"name", "id", "kind", "type", "cases", "notes", "platforms"}
     extra = set(item) - allowed
     if extra:
         raise SchemaError(f"{context} has unknown fields: {', '.join(sorted(extra))}")
     require_optional_note(item.get("notes"), f"{context}.notes")
     require_string(item.get("name"), f"{context}.name", identifier=True)
     require_string(item.get("id"), f"{context}.id")
+    _normalize_platforms(item, context)
     if item.get("kind") not in LAYOUT_KINDS:
         raise SchemaError(f"{context}.kind must be field or vtable_slot")
     require_string(item.get("type"), f"{context}.type")

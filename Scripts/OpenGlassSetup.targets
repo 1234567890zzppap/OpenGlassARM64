@@ -9,9 +9,11 @@
     <OpenGlassSignTool Condition="'$(OpenGlassSignTool)'==''">signtool.exe</OpenGlassSignTool>
   </PropertyGroup>
 
+  <!-- The installer is x64-only by design: it ships the x64 payload and must not be
+       produced by an ARM64 or ARM64EC build of the same solution. -->
   <Target Name="OpenGlassPackageInstaller"
           AfterTargets="Build"
-          Condition="'$(OpenGlassInstallerEnabled)'=='true' and ('$(Configuration)'=='Release' or '$(Configuration)'=='ReleaseSigned')">
+          Condition="'$(OpenGlassInstallerEnabled)'=='true' and '$(Platform)'=='x64' and ('$(Configuration)'=='Release' or '$(Configuration)'=='ReleaseSigned')">
     <Exec Condition="!Exists('$(OpenGlassIsccTool)')"
           Command="where &quot;$(OpenGlassIsccTool)&quot;"
           IgnoreExitCode="true"

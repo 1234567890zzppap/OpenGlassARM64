@@ -1,8 +1,10 @@
 #include "pch.h"
+#include "StartupTrace.hpp"
 #include "MsstyleInternals.hpp"
 #include "GlassKernel.hpp"
 #include "uDwmProjection.hpp"
 #include "Shared.hpp"
+#include "GlassEngine.hpp"
 #include "dwmcoreProjection.hpp"
 #include "GlassEffectBrush.hpp"
 #include "GlassReflectionBrush.hpp"
@@ -121,6 +123,22 @@ namespace OpenGlass::GlassKernel
 
 bool GlassKernel::IsDrawGeometryCommand(UINT commandType, const DWM::span<const BYTE>* resources) noexcept
 {
+	// The draw-geometry command type is a build constant on ARM64, so record what the render
+	// path actually delivers for commands of the expected size. A mismatch means the glass
+	// never renders even though every hook installed correctly.
+	if (resources->length == sizeof(dwmcore::CDrawGeometryCommand))
+	{
+		static std::atomic<unsigned> s_logged{ 0 };
+		if (s_logged.fetch_add(1, std::memory_order_relaxed) < 8)
+		{
+			StartupTrace::Write(
+				"draw-command: observed type=%u length=%zu expected=%u",
+				commandType,
+				resources->length,
+				g_drawGeometryCommandType
+			);
+		}
+	}
 	return
 		commandType == g_drawGeometryCommandType &&
 		resources->length == sizeof(dwmcore::CDrawGeometryCommand);
@@ -128,6 +146,27 @@ bool GlassKernel::IsDrawGeometryCommand(UINT commandType, const DWM::span<const 
 
 HRESULT GlassKernel::MyResourceHelper_CreateGeometryFromHRGN(HRGN hrgn, uDWM::CRgnGeometryProxy** geometry)
 {
+	// g_combinedRgn becomes the effect brush geometry, so the individual regions decide whether
+	// the glass covers the caption only or the whole window. Record each source region: 24H2
+	// supplies caption and border geometry separately, and merging both is what paints glass
+	// over the native border.
+	{
+		static std::atomic<unsigned> s_logged{ 0 };
+		const auto sample = s_logged.fetch_add(1, std::memory_order_relaxed);
+		if (sample < 16 || (sample % 128) == 0)
+		{
+			RECT box{};
+			const auto type = GetRgnBox(hrgn, &box);
+			StartupTrace::Write(
+				"region: geometry type=%d box=%ld,%ld,%ld,%ld",
+				type,
+				box.left,
+				box.top,
+				box.right,
+				box.bottom
+			);
+		}
+	}
 	if (g_combinedRgn)
 	{
 		CombineRgn(
@@ -150,6 +189,25 @@ HRESULT GlassKernel::MyCTopLevelWindow_UpdateNCAreaBackground(uDWM::CTopLevelWin
 	g_combinedRgn.reset(CreateRectRgn(0, 0, 0, 0));
 	const auto combinedRgnScope = wil::scope_exit([]
 	{
+		// The merged geometry is what the effect brush ends up covering; its box shows whether the
+		// union stayed inside the caption or grew to the whole window.
+		{
+			static std::atomic<unsigned> s_logged{ 0 };
+			const auto sample = s_logged.fetch_add(1, std::memory_order_relaxed);
+			if (g_combinedRgn && (sample < 16 || (sample % 128) == 0))
+			{
+				RECT box{};
+				const auto type = GetRgnBox(g_combinedRgn.get(), &box);
+				StartupTrace::Write(
+					"region: combined type=%d box=%ld,%ld,%ld,%ld",
+					type,
+					box.left,
+					box.top,
+					box.right,
+					box.bottom
+				);
+			}
+		}
 		g_redirectFirstCreateRectRgnCall = std::nullopt;
 		g_combinedRgn.reset();
 	});
@@ -207,6 +265,37 @@ HRGN WINAPI GlassKernel::MyCreateRectRgn(int x1, int y1, int x2, int y2)
 HRGN WINAPI GlassKernel::MyExtCreateRegion(const XFORM* lpx, DWORD nCount, const RGNDATA* lpData)
 {
 	const auto rectangles = reinterpret_cast<LPRECT>(const_cast<RGNDATA*>(lpData)->Buffer);
+	// The window frame region is what CLegacyNonClientBackground turns into its caption/border
+	// geometry, so a wrong rectangle here shows up as a one-pixel background instead of a caption.
+	{
+		static std::atomic<unsigned> s_logged{ 0 };
+		const auto sample = s_logged.fetch_add(1, std::memory_order_relaxed);
+		if (sample < 16 || (sample % 128) == 0)
+		{
+			const auto count = lpData->rdh.nCount;
+			StartupTrace::Write(
+				"region: ext header size=%u type=%u count=%u rgnSize=%u bound=%ld,%ld,%ld,%ld first=%ld,%ld,%ld,%ld diameter=%d rounded=%ld,%ld,%ld,%ld dpi=%ld",
+				lpData->rdh.dwSize,
+				lpData->rdh.iType,
+				count,
+				lpData->rdh.nRgnSize,
+				lpData->rdh.rcBound.left,
+				lpData->rdh.rcBound.top,
+				lpData->rdh.rcBound.right,
+				lpData->rdh.rcBound.bottom,
+				count > 0 ? rectangles[0].left : 0L,
+				count > 0 ? rectangles[0].top : 0L,
+				count > 0 ? rectangles[0].right : 0L,
+				count > 0 ? rectangles[0].bottom : 0L,
+				g_diameter,
+				g_roundedBounds.left,
+				g_roundedBounds.top,
+				g_roundedBounds.right,
+				g_roundedBounds.bottom,
+				static_cast<long>(uDWM::CDesktopManager::GetInstance()->GetDPIValue())
+			);
+		}
+	}
 	if (lpData->rdh.nCount == 4)
 	{
 		// impl for glass8 .layout propertie DontDeflateInactiveFrameGeometry
@@ -294,11 +383,44 @@ HRESULT GlassKernel::MyCTopLevelWindow_EnsureImages_At_Least_W10_1903()
 	return result;
 }
 
+namespace OpenGlass::uDWM
+{
+#if defined(_M_ARM64)
+	PRLIST_ENTRY CWindowList::GetWindowListForDesktop(ULONG_PTR desktopID)
+	{
+		if (g_versionInfo.build < os::build_w11_21h2) [[unlikely]]
+		{
+			// The desktop-window-list map Layout is only verified from Windows 11 on
+			// ARM64, so older ARM64 builds stay unsupported instead of guessed.
+			return nullptr;
+		}
+		if (g_versionInfo.build >= os::build_w11_24h2)
+		{
+			// 24H2 exports the helper on ARM64 again, so call it instead of the map lookup.
+			const auto getWindowList = Symbol_CWindowList_GetWindowListForDesktop_Arm64.get();
+			return getWindowList(this, desktopID);
+		}
+		const auto findElement = Symbol_CWindowList_DesktopWindowListMap_FindElement.get();
+		const auto entry = findElement(
+			CWindowList_DesktopWindowListMap.address(this),
+			desktopID
+		);
+		return entry ? CWindowList_DESKTOP_WINDOWLIST_MAP_ENTRY_RList.address(entry) : nullptr;
+	}
+#endif
+}
+
 void GlassKernel::RedrawAllTopLevelWindow(bool deepRedraw)
 {
 	ULONG_PTR desktopID{ 0 };
 	Util::GetDesktopID(1, &desktopID);
 	const auto windowList = uDWM::CDesktopManager::GetInstance()->GetWindowList()->GetWindowListForDesktop(desktopID);
+	if (!windowList) [[unlikely]]
+	{
+		// ARM64 reaches this path through the desktop-map lookup, which reports an
+		// unknown desktop directly instead of returning a sentinel list.
+		return;
+	}
 	for (auto i = windowList->Blink; i != windowList; i = i->Blink)
 	{
 		RedrawTopLevelWindow(
@@ -574,6 +696,17 @@ void GlassKernel::Update(GlassEngine::UpdateType type)
 		Shared::g_reflectionParallaxIntensity = std::clamp(static_cast<float>(GlassEngine::GetDwordFromRegistry(L"ColorizationGlassReflectionParallaxIntensity", 13)) / 100.f, 0.f, 1.f);
 		Shared::g_reflectionPolicy = static_cast<Shared::ReflectionPolicy>(GlassEngine::GetDwordFromRegistry(L"ColorizationGlassReflectionPolicy", 0xFFFFFFFF));
 		Shared::g_blurAmount = BlurSettings::DecodeBlurAmount(GlassEngine::GetDwordFromRegistry(L"BlurDeviation", BlurSettings::DefaultEncodedDeviation));
+		StartupTrace::Write(
+			"settings: type=%u blur=%.2f optimization=%u roundRect=%d opaqueBlend=%d transparency=%d useD3D=%d glassOpacity=%.2f",
+			static_cast<unsigned>(Shared::g_type),
+			static_cast<double>(Shared::g_blurAmount),
+			static_cast<unsigned>(Shared::g_blurOptimization),
+			Shared::g_roundRectRadius,
+			Shared::g_opaqueBlend,
+			Shared::g_transparencyEnabled,
+			Shared::g_useD3DRendering,
+			static_cast<double>(Shared::g_glassOpacity)
+		);
 		Shared::g_blurOptimization = static_cast<D2D1_GAUSSIANBLUR_OPTIMIZATION>(std::clamp(GlassEngine::GetDwordFromRegistry(L"BlurOptimization", 0), 0ul, 2ul));
 		Shared::g_roundRectRadius = static_cast<int>(GlassEngine::GetDwordFromRegistry(L"RoundRectRadius"));
 		ApplyCornerRadiusToWindowFrames(Shared::g_roundRectRadius);
@@ -632,17 +765,34 @@ void GlassKernel::Startup()
 			g_drawGeometryCommandType = 444;
 			break;
 		}
+#if defined(_M_ARM64)
+		case os::build_w11_23h2:
+		{
+			// Verified on the 22631 ARM64 dwmcore binary: CRenderDataBuilder::DrawGeometry
+			// loads 444 (0x1BC) as the draw-geometry command type. x64 resolves 23H2 through
+			// the instruction scan below, which cannot match AArch64 code.
+			g_drawGeometryCommandType = 444;
+			break;
+		}
+#endif
 		// Microsoft has been changing things so frequently since 24H2 that
 		// the command types can be completely different under the same build number,
 		// they are absolutely insane
 		case os::build_w11_24h2:
 		{
+#if defined(_M_ARM64)
+			// Verified on the 26100 ARM64 dwmcore binary: CRenderDataBuilder::DrawGeometry loads
+			// 0x1A1 (417) as the draw-geometry command type and stores it at command+4, the same
+			// slot the x64 scan reads. The x64 instruction scan cannot match AArch64 code.
+			g_drawGeometryCommandType = 0x1A1;
+#endif
 			break;
 		}
 		default:
 			break;
 		}
 	}
+#if !defined(_M_ARM64)
 	if (!g_drawGeometryCommandType)
 	{
 		auto CRenderDataBuilder_DrawGeometry_Instructions = static_cast<UCHAR*>(
@@ -673,6 +823,7 @@ void GlassKernel::Startup()
 			i--;
 		} while (i);
 	}
+#endif
 
 	winrt::com_ptr<IDCompositionDesktopDevice> dcompDevice{ nullptr };
 	FAIL_FAST_IF_FAILED_MSG(uDWM::CDesktopManager::GetInstance()->GetInteropCompositorDCompDevicePartner()->QueryInterface(dcompDevice.put()), "Unable to obtain IDCompositionDesktopDevice");
@@ -686,22 +837,33 @@ void GlassKernel::Startup()
 	const auto build_before_w11_24h2 = uDWM::g_versionInfo.build < os::build_w11_24h2;
 	const auto build_before_server_2022 = uDWM::g_versionInfo.build < os::build_server_2022;
 	g_CreateRoundRectRgn_Org = CreateRoundRectRgn;
-	FAIL_FAST_IF_FAILED(g_gdiImportHooks.Prepare(
-		uDWM::g_moduleHandle,
-		std::initializer_list<HookHelper::ImportDllDetourInfo>
-		{
+	// The gdi32 region hooks rewrite the rectangles uDWM builds its non-client frame from, so a
+	// wrong rectangle shows up as a frame that no longer covers the window. SkipGdiRegionHooks
+	// removes them for one build without touching anything else, which isolates that layer from
+	// the drawing hooks when the frame drifts.
+	if (GlassEngine::GetDwordFromRegistry(L"SkipGdiRegionHooks", 0))
+	{
+		StartupTrace::Write("region: gdi32 import hooks skipped on request");
+	}
+	else
+	{
+		FAIL_FAST_IF_FAILED(g_gdiImportHooks.Prepare(
+			uDWM::g_moduleHandle,
+			std::initializer_list<HookHelper::ImportDllDetourInfo>
 			{
-				"gdi32.dll",
-				std::initializer_list<HookHelper::ImportFunctionDetourInfo>
 				{
-					HookHelper::MakeImportDetour<&MyCreateRoundRectRgn>("CreateRoundRectRgn", &g_CreateRoundRectRgn_Org, build_before_w11_24h2),
-					HookHelper::MakeImportDetour<&MyCreateRectRgn>("CreateRectRgn", &g_CreateRectRgn_Org, !build_before_w11_24h2),
-					HookHelper::MakeImportDetour<&MyExtCreateRegion>("ExtCreateRegion", &g_ExtCreateRegion_Org)
+					"gdi32.dll",
+					std::initializer_list<HookHelper::ImportFunctionDetourInfo>
+					{
+						HookHelper::MakeImportDetour<&MyCreateRoundRectRgn>("CreateRoundRectRgn", &g_CreateRoundRectRgn_Org, build_before_w11_24h2),
+						HookHelper::MakeImportDetour<&MyCreateRectRgn>("CreateRectRgn", &g_CreateRectRgn_Org, !build_before_w11_24h2),
+						HookHelper::MakeImportDetour<&MyExtCreateRegion>("ExtCreateRegion", &g_ExtCreateRegion_Org)
+					}
 				}
 			}
-		}
-	));
-	HookHelper::GetCurrentHookTransaction().Apply(g_gdiImportHooks);
+		));
+		HookHelper::GetCurrentHookTransaction().Apply(g_gdiImportHooks);
+	}
 
 	const auto build_before_w10_1903 = uDWM::g_versionInfo.build < os::build_w10_1903;
 	HookHelper::ApplyInlineHooks(

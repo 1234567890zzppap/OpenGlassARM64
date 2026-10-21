@@ -19,7 +19,10 @@ namespace OpenGlass::CaptionMetricsTweaker
 		Disabled = 0,
 		WindowsVista,
 		Windows7,
-		Windows8
+		Windows8,
+		WindowsTP,
+		WindowsIP,
+		WindowsLH
 	} g_captionButtons{ 0 };
 	SIZE CalculateButtonSize(int cySize, int buttonType);
 }
@@ -51,6 +54,18 @@ SIZE CaptionMetricsTweaker::CalculateButtonSize(int cySize, int buttonType)
 		std::tie(heightRatio, loneWidthRatio, closeWidthRatio, maxWidthRatio, minWidthRatio) =
 			std::make_tuple(0.95454544f, 1.6363636f, 2.2272727f, 1.2272727f, 1.3181819f);
 		break;
+		case CaptionButtons::WindowsTP:
+		std::tie(heightRatio, loneWidthRatio, closeWidthRatio, maxWidthRatio, minWidthRatio) =
+			std::make_tuple(0.95454544f, 1.6363636f, 2.2272727f, 1.2272727f, 1.3181819f);
+		break;	
+	case CaptionButtons::WindowsIP:
+		std::tie(heightRatio, loneWidthRatio, closeWidthRatio, maxWidthRatio, minWidthRatio) =
+			std::make_tuple(0.95454544f, 1.6363636f, 2.2272727f, 2.1818182f, 2.1818182f);
+		break;		
+	case CaptionButtons::WindowsLH:
+		std::tie(heightRatio, loneWidthRatio, closeWidthRatio, maxWidthRatio, minWidthRatio) =
+			std::make_tuple(1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
+		break;			
 	}
 
 	SIZE buttonSize = { 0, static_cast<LONG>(std::round(static_cast<float>(cySize) * heightRatio)) };
@@ -151,12 +166,15 @@ HRESULT CaptionMetricsTweaker::MyCTopLevelWindow_UpdateNCAreaPositionsAndSizes(u
 		offsetRight = toolButtonSize.cx + offsetRight;
 	}
 
-	if (auto iconVisual = This->GetIconVisual(); iconVisual && cxLeft > 0)
+	if (g_captionButtons != 4 && g_captionButtons != 5)
 	{
-		iconVisual->SetInsetFromParentLeft(cxLeft);
+		if (auto iconVisual = This->GetIconVisual(); iconVisual && cxLeft > 0)
+		{
+			iconVisual->SetInsetFromParentLeft(cxLeft);
+		}
 	}
 
-	if (auto dwriteTextVisual = This->GetDWriteTextVisual(); dwriteTextVisual)
+	if (auto dwriteTextVisual = This->GetDWriteTextVisual(); dwriteTextVisual && g_captionButtons != 5 && g_captionButtons != 4)
 	{
 		if (auto iconVisual = This->GetIconVisual(); iconVisual && cxLeft > 0)
 		{

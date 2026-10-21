@@ -199,9 +199,9 @@ namespace OpenGlass
 		};
 
 		m_rbGlassType->SetSelection(std::clamp<int>(m_config->GetDword(L"GlassType", 0), 0, 1));
-		m_chkEnableTransparency->SetValue(m_systemTransparency
-			? m_userConfig->GetDword(L"EnableTransparency", 0) != 0
-			: m_config->GetDword(L"ColorizationOpaqueBlend", 0) == 0);
+		// The checkbox shows the switch OpenGlass actually reads. Windows transparency is a
+		// separate precondition for the effect and is reported by the diagnostics view.
+		m_chkEnableTransparency->SetValue(m_config->GetDword(L"ColorizationOpaqueBlend", 0) == 0);
 
 		m_slColorIntensity->SetRange(
 			ColorizationPresets::ClassicIntensityMinimum,

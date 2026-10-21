@@ -4,6 +4,7 @@
 #include <TlHelp32.h>
 #include <algorithm>
 #include <cstring>
+#include "StartupTrace.hpp"
 #include <cwchar>
 #include <string>
 #define FORMAT_IMPORT_FUNCTION(function) (IS_INTRESOURCE(function) ? ("#" + std::to_string(reinterpret_cast<ULONG_PTR>(function))).c_str() : function)
@@ -352,10 +353,28 @@ void HookHelper::HookTransaction::ApplyInstruction(InstructionPatch& patch) noex
 void HookHelper::HookTransaction::Commit() noexcept
 {
 	FAIL_FAST_IF_FAILED_MSG(!m_committed ? S_OK : E_UNEXPECTED, "Hook transaction was committed twice");
+	StartupTrace::Write(
+		"hook: transaction begin (%hs), %zu inline, %zu pointer, %zu import, %zu instruction",
+		m_mode == HookMode::Install ? "install" : "remove",
+		m_inlineHooks.size(),
+		m_pointerHooks.size(),
+		m_importHooks.size(),
+		m_instructionPatches.size()
+	);
 	FAIL_FAST_IF_FAILED_MSG(SlimDetoursTransactionBegin(), "Unable to begin the %hs hook transaction", m_mode == HookMode::Install ? "install" : "remove");
 	for (size_t index = 0; index < m_inlineHooks.size(); ++index)
 	{
 		const auto& [hook, group] = m_inlineHooks[index];
+		// The address is traced before the attach so a failure inside SlimDetours still names
+		// the hook that was being installed.
+		StartupTrace::Write(
+			"hook: attach %.*hs[%zu] target=%p detour=%p",
+			static_cast<int>(group.size()),
+			group.data(),
+			index,
+			*hook.original,
+			hook.detour
+		);
 		const auto hr = m_mode == HookMode::Install ? SlimDetoursAttach(hook.original, hook.detour) : SlimDetoursDetach(hook.original, hook.detour);
 		FAIL_FAST_IF_FAILED_MSG(hr, "Unable to %hs hook %.*hs[%zu] at %p", m_mode == HookMode::Install ? "install" : "remove", static_cast<int>(group.size()), group.data(), index, *hook.original);
 	}
@@ -373,6 +392,7 @@ void HookHelper::HookTransaction::Commit() noexcept
 	}
 	FAIL_FAST_IF_FAILED_MSG(SlimDetoursTransactionCommit(), "Unable to commit the %hs hook transaction", m_mode == HookMode::Install ? "install" : "remove");
 	m_committed = true;
+	StartupTrace::Write("hook: transaction committed (%hs)", m_mode == HookMode::Install ? "install" : "remove");
 }
 
 HMODULE HookHelper::GetRemoteModuleBase(DWORD processId, LPCWSTR moduleName)
