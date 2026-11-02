@@ -84,7 +84,7 @@ namespace OpenGlass
 		ManagedFiles::CheckPath(path);
 		return std::filesystem::exists(path) ? Content{ ManagedFiles::Read(path) } : std::nullopt;
 	}
-	std::shared_ptr<ConfigurationResources::Preparation> ConfigurationResources::Prepare(const PresetPackages::Package& package, Settings::Scope scope)
+	std::unique_ptr<ConfigurationResources::Preparation> ConfigurationResources::Prepare(const PresetPackages::Package& package, Settings::Scope scope)
 	{
 		ManagedFiles::Directory(m_root); ManagedFiles::Protect(m_root);
 		for (const auto& item : std::filesystem::directory_iterator(m_root))
@@ -96,7 +96,7 @@ namespace OpenGlass
 			lease.reset();
 			try { ManagedFiles::RemoveTree(item.path(), m_root); } catch (...) { LOG_CAUGHT_EXCEPTION(); }
 		}
-		auto preparation = std::make_shared<Preparation>();
+		auto preparation = std::make_unique<Preparation>();
 		preparation->directory = m_root / (L".prepare-" + std::filesystem::path(PresetPackages::GeneratePackageUuid()).wstring());
 		ManagedFiles::Directory(preparation->directory);
 		preparation->lease.reset(CreateFileW((preparation->directory / L"lease").c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr));
@@ -131,7 +131,7 @@ namespace OpenGlass
 		}
 		return preparation;
 	}
-	std::shared_ptr<ConfigurationResources::Preparation> ConfigurationResources::PrepareFile(Settings::Scope scope, Settings::Id id, const std::filesystem::path& source)
+	std::unique_ptr<ConfigurationResources::Preparation> ConfigurationResources::PrepareFile(Settings::Scope scope, Settings::Id id, const std::filesystem::path& source)
 	{
 		PresetPackages::CreateRequest request;
 		request.metadata.name = L"Configuration resource"; request.metadata.authorName = L"External source";
@@ -207,7 +207,11 @@ namespace OpenGlass
 		if (!std::filesystem::exists(marker))
 		{
 			const auto owner = Utf8(m_sid);
-			ManagedFiles::Write(marker, { reinterpret_cast<const std::byte*>(owner.data()), owner.size() });
+			// A failed write must not publish a partial SID and block later recovery.
+			const auto temporary = directory / L"owner.tmp";
+			std::filesystem::remove(temporary);
+			ManagedFiles::Write(temporary, { reinterpret_cast<const std::byte*>(owner.data()), owner.size() });
+			THROW_IF_WIN32_BOOL_FALSE(MoveFileExW(temporary.c_str(), marker.c_str(), MOVEFILE_WRITE_THROUGH));
 		}
 		Json state{ { "version", 1 }, { "sid", Utf8(m_sid) }, { "files", Json::array() }, { "registry", Json::array() }, { "color", m_color ? Choice(*m_color) : Json(nullptr) } };
 		for (const auto& [path, before] : m_attemptFiles)

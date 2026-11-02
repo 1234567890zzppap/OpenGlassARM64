@@ -5,10 +5,21 @@ namespace OpenGlass::uDWM
 {
 	using namespace DWM;
 
+	struct ACCENT_POLICY;
+	struct CAccent;
+	struct CBaseGeometryProxy;
+	struct CBitmapSource;
 	struct CCompositor;
+	struct CContainerVisual;
 	struct CGlassColorizationResources;
 	struct CImage;
+	struct CPrimitive;
 	struct CLegacyNonClientBackground;
+	struct CLivePreview;
+	struct CLivePreviewTimeline;
+	struct LivePreviewBrush;
+	struct LivePreviewVisual;
+	struct LivePreviewResource;
 	struct CNineGridVisual;
 	struct CRectangleVisual;
 	struct CResourceProxy;
@@ -17,6 +28,9 @@ namespace OpenGlass::uDWM
 	struct CVisual;
 	struct CVisualProxy;
 	struct CWindowBorder;
+	struct CSecondaryWindowRepresentation;
+	struct CProjectionBorderVisual;
+	struct CProjectionBorderVisualShim;
 	struct CWindowData;
 	struct CWindowList;
 	struct DESKTOP_WINDOWLIST_MAP_ENTRY;

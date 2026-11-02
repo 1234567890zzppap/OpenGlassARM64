@@ -1,0 +1,65 @@
+{
+  "layouts": [
+    {
+      "name": "CAtlasedImage_GetParent",
+      "id": "CAtlasedImage_GetParent",
+      "kind": "field",
+      "type": "CAtlasedRectsVisual*",
+      "cases": [
+        {
+          "platform": null,
+          "ranges": [
+            {
+              "offset": 80,
+              "otherwise": true
+            }
+          ]
+        }
+      ],
+      "notes": "CAtlasedRectsVisual::InsertAtlasImageAtIndex writes the owning CAtlasedRectsVisual pointer to CAtlasedImage +80 and RemoveAtlasImage clears it; CButton::RedrawVisual reads the same link while moving atlas images. Verified on uDWM 22000.194, 22621.6630, and 26100.7705. On 26100.7705, DisconnectFromParent reads +80, InsertAtlasImageAtIndex writes +80, and CButton::RedrawVisual routes movement through DisconnectFromParent and AddAtlasImage. ButtonGlowHandler follows the owner to restore the hot glow's atlas-array z-order. The open range remains runtime behavior rather than proof for unanalyzed future builds."
+    },
+    {
+      "name": "CAtlasedImage_GetPartId",
+      "id": "CAtlasedImage_GetPartId",
+      "kind": "field",
+      "type": "DWORD",
+      "cases": [
+        {
+          "platform": null,
+          "ranges": [
+            {
+              "offset": 132,
+              "until": {
+                "build": 18362,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 120,
+              "otherwise": true
+            }
+          ]
+        }
+      ],
+      "notes": "CTopLevelAtlasedRectsVisual::ShouldCloneAtlasImage\nCTopLevelAtlasedRectsVisual::ShouldDrawAtlasImage\nWARNING: The PartId range check is (value - 9) > 8. Use ShouldDrawAtlasImage\nor ShouldCloneAtlasImage, NOT CAtlasedImage::SetDirtyFlags (different DWORD)."
+    },
+    {
+      "name": "CAtlasedImage_GetSize",
+      "id": "CAtlasedImage_GetSize",
+      "kind": "field",
+      "type": "SIZE",
+      "cases": [
+        {
+          "platform": null,
+          "ranges": [
+            {
+              "offset": 24,
+              "otherwise": true
+            }
+          ]
+        }
+      ],
+      "notes": "Verified on x64 uDWM 17763.719, 18362.267, 19041.3758, 20348.2582, 22000.194, 22621.6630, 26100.7705 and 26100.8972: CTopLevelWindow::GetActualWindowRect uses +24 as cx for the side atlas images and +28 as cy for the bottom image; CAtlasedImage::SetSize independently compares both 32-bit dimensions and writes the full 8-byte SIZE at +24. The 22000.194 background workaround uses an all-zero SIZE sentinel. The open range is runtime behavior, not evidence for unanalyzed builds."
+    }
+  ]
+}

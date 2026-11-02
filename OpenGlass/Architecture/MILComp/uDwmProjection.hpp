@@ -67,6 +67,10 @@ namespace OpenGlass::uDWM
 	struct VisualCollection;
 	struct CVisualProxy : CResourceProxy
 	{
+		inline HRESULT SetClip(CBaseGeometryProxy* geometry)
+		{
+			OPENGLASS_MUSTTAIL return Projection::Invoke<&CVisualProxy::SetClip>(this, geometry);
+		}
 		inline HRESULT SetSize(double cx, double cy)
 		{
 			OPENGLASS_MUSTTAIL return Projection::Invoke<&CVisualProxy::SetSize>(this, cx, cy);
@@ -100,6 +104,14 @@ namespace OpenGlass::uDWM
 	};
 	struct CVisual : IVisual
 	{
+		inline HRESULT MoveToFront(bool treeLevel)
+		{
+			OPENGLASS_MUSTTAIL return Projection::Invoke<&CVisual::MoveToFront>(this, treeLevel);
+		}
+		inline void SetOpacity(double opacity)
+		{
+			OPENGLASS_MUSTTAIL return Projection::Invoke<&CVisual::SetOpacity>(this, opacity);
+		}
 		inline bool IsRTLMirrored() const
 		{
 			const auto propByte = CVisual_IsRTLMirrored_ByteOffset.address(this);
@@ -189,6 +201,10 @@ namespace OpenGlass::uDWM
 	};
 	struct CContainerVisual : CVisual
 	{
+		inline void RenderRecursive()
+		{
+			OPENGLASS_MUSTTAIL return Projection::Invoke<&CContainerVisual::RenderRecursive>(this);
+		}
 		inline HRESULT STDMETHODCALLTYPE InitializeVisualTreeClone(
 			CVisual* clonedVisual,
 			UINT cloneOption
@@ -218,6 +234,10 @@ namespace OpenGlass::uDWM
 	};
 	struct CRectangleVisual : CSpriteVisual
 	{
+		CBaseGeometryProxy* GetClip() const
+		{
+			return CRectangleVisual_Clip.read(this);
+		}
 		const D2D1_RECT_F& GetRect() const
 		{
 			return *CRectangleVisual_GetRect.address(this);
@@ -244,6 +264,36 @@ namespace OpenGlass::uDWM
 		}
 	};
 	struct CNineGridVisual : CRectangleVisual {};
+	struct ACCENT_POLICY
+	{
+		DWORD AccentState;
+		DWORD AccentFlags;
+		DWORD dwGradientColor;
+		DWORD dwAnimationId;
+	};
+	struct CAccent : CContainerVisual
+	{
+		bool& GetParentVisible()
+		{
+			return CAccent_ParentVisible.ref(this);
+		}
+		ACCENT_POLICY& GetAccentPolicy()
+		{
+			return CAccent_AccentPolicy.ref(this);
+		}
+		const ACCENT_POLICY& GetAccentPolicy() const
+		{
+			return CAccent_AccentPolicy.ref(this);
+		}
+		const ACCENT_POLICY& GetTransitionPolicy() const
+		{
+			return CAccent_TransitionPolicy.ref(this);
+		}
+		CNineGridVisual* GetBackgroundVisual() const
+		{
+			return CAccent_BackgroundVisual.read(this);
+		}
+	};
 	struct CLegacyNonClientBackground : CContainerVisual
 	{
 		inline void ClearAll()
@@ -327,12 +377,42 @@ namespace OpenGlass::uDWM
 		}
 	};
 
-	struct CImage : CNineGridVisual {};
-	struct CBitmapSource : CBaseObject {};
+	struct CBitmapSource;
+	struct CImage : CNineGridVisual
+	{
+		inline static HRESULT Create(CImage** image)
+		{
+			OPENGLASS_MUSTTAIL return Projection::Invoke<&CImage::Create>(image);
+		}
+		inline void SetBitmapSource(CBitmapSource* bitmap)
+		{
+			OPENGLASS_MUSTTAIL return Projection::Invoke<&CImage::SetBitmapSource>(this, bitmap);
+		}
+	};
+	struct CButtonVisual : CImage {};
+	struct CBitmapSource : CBaseObject
+	{
+		MARGINS& GetOutsetMargins()
+		{
+			return CBitmapSource_OutsetMargins.ref(this);
+		}
+	};
 	struct CBitmapSourceArray : DynArray<CBitmapSource*> {};
 
-	struct CPrimitive : CBaseObject {};
-	struct CNineGridImagePrimitive : CPrimitive {};
+	struct CPrimitive : CBaseObject
+	{
+		inline const SIZE& GetSize() const
+		{
+			return CPrimitive_GetSize.ref(this);
+		}
+	};
+	struct CNineGridImagePrimitive : CPrimitive
+	{
+		inline HRESULT ClonePrimitive(CPrimitive** primitive, UINT cloneOptions)
+		{
+			OPENGLASS_MUSTTAIL return Projection::Invoke<&CNineGridImagePrimitive::ClonePrimitive>(this, primitive, cloneOptions);
+		}
+	};
 	struct CThemePartPrimitive : CNineGridImagePrimitive
 	{
 		inline DWORD GetPartId() const
@@ -343,8 +423,6 @@ namespace OpenGlass::uDWM
 
 	struct CButton : CCanvasVisual
 	{
-		inline static PVOID* vftable{ nullptr };
-
 		inline float& GetGlyphOpacity()
 		{
 			return *CButton_GetGlyphOpacity.address(this);
@@ -360,8 +438,38 @@ namespace OpenGlass::uDWM
 	};
 
 	struct CTopLevelWindow;
+	struct CProjectionBorderVisual : CVisual {};
+	struct CProjectionBorderVisualShim : CVisual {};
+	struct CSecondaryWindowRepresentation
+	{
+		CWindowData* GetData() const
+		{
+			return CSecondaryWindowRepresentation_Data.read(this);
+		}
+		UINT GetKind() const
+		{
+			return CSecondaryWindowRepresentation_Kind.read(this);
+		}
+		DWORD GetFlags() const
+		{
+			return CSecondaryWindowRepresentation_Flags.read(this);
+		}
+	};
+
 	struct CWindowData : CBaseObject
 	{
+		inline bool HasLivePreviewGlass() const
+		{
+			return !(CWindowData_LivePreviewFlags.read(this) & 0x80) && CWindowData_WindowType.read(this) == 1;
+		}
+		inline HRESULT OnWindowSizeUpdated()
+		{
+			OPENGLASS_MUSTTAIL return Projection::Invoke<&CWindowData::OnWindowSizeUpdated>(this);
+		}
+		inline CContainerVisual* GetProjectionBorder() const
+		{
+			return CWindowData_GetProjectionBorder.read(this);
+		}
 		inline HWND GetHwnd() const
 		{
 			return *CWindowData_GetHwnd.address(this);
@@ -374,6 +482,11 @@ namespace OpenGlass::uDWM
 		inline DWM_SYSTEMBACKDROP_TYPE& GetSystemBackdropType()
 		{
 			return *CWindowData_GetSystemBackdropType_Index.address(this);
+		}
+
+		inline const RECT& GetWindowRect() const
+		{
+			return CWindowData_GetWindowRect.ref(this);
 		}
 
 		inline UINT GetWindowDPI() const
@@ -401,6 +514,10 @@ namespace OpenGlass::uDWM
 		inline bool ShouldTransitionOnMaximized() const
 		{
 			return GetClientBlurAttribute() & 0x8;
+		}
+		void EnableTransitionOnMaximized()
+		{
+			CWindowData_GetClientBlurAttribute.ref(this) |= 0x8;
 		}
 		inline MARGINS& GetExtendedFrameMargins()
 		{
@@ -469,11 +586,28 @@ namespace OpenGlass::uDWM
 	};
 	struct CTopLevelWindow : CContainerVisual
 	{
+		struct WindowFrame;
+		inline static HRESULT CreateBitmapFromAtlas(HTHEME theme, int partId, MARGINS* margins, CBitmapSource** bitmap)
+		{
+			OPENGLASS_MUSTTAIL return Projection::Invoke<&CTopLevelWindow::CreateBitmapFromAtlas>(theme, partId, margins, bitmap);
+		}
+		inline void OnAccentPolicyUpdated()
+		{
+			OPENGLASS_MUSTTAIL return Projection::Invoke<&CTopLevelWindow::OnAccentPolicyUpdated>(this);
+		}
+		inline HRESULT CloneVisualTreeForLivePreview(bool glassOnly, CTopLevelWindow** clonedWindow)
+		{
+			OPENGLASS_MUSTTAIL return Projection::Invoke<&CTopLevelWindow::CloneVisualTreeForLivePreview>(this, glassOnly, clonedWindow);
+		}
 		inline static PVOID* vftable{ nullptr };
 
 		inline CWindowData* GetData() const
 		{
 			return *CTopLevelWindow_GetData_Index.address(this);
+		}
+		CAccent* GetAccentVisual() const
+		{
+			return CTopLevelWindow_AccentVisual.read(this);
 		}
 		inline CImage* GetIconVisual() const
 		{
@@ -525,6 +659,10 @@ namespace OpenGlass::uDWM
 			return (button && *button) ? *button : nullptr;
 		}
 
+		inline const MARGINS& GetFrameOutsideMargins(bool zoomed) const
+		{
+			return zoomed ? CTopLevelWindow_GetFrameOutsideMargins_Zoomed.ref(this) : CTopLevelWindow_GetFrameOutsideMargins_Normal.ref(this);
+		}
 		inline MARGINS& GetFrameOutsideMargins(bool zoomed)
 		{
 			if (zoomed)
@@ -553,6 +691,26 @@ namespace OpenGlass::uDWM
 		{
 			OPENGLASS_MUSTTAIL return Projection::Invoke<&CTopLevelWindow::OnSystemBackdropUpdated>(this);
 		}
+		inline const CPrimitive* GetNCAreaAtlasImage1() const
+		{
+			return CTopLevelWindow_GetNCAreaAtlasImage1.read(this);
+		}
+		inline const CPrimitive* GetNCAreaAtlasImage2() const
+		{
+			return CTopLevelWindow_GetNCAreaAtlasImage2.read(this);
+		}
+		inline const CPrimitive* GetNCAreaAtlasImage3() const
+		{
+			return CTopLevelWindow_GetNCAreaAtlasImage3.read(this);
+		}
+		inline bool HasMaximizedClip() const
+		{
+			return IsWindowMaximized();
+		}
+		inline const MARGINS* GetCloneFrameMargins() const
+		{
+			return CTopLevelWindow_GetCloneFrameMargins.read(this);
+		}
 		inline RECT* GetActualWindowRect(
 			RECT* rect,
 			char relative,
@@ -564,11 +722,96 @@ namespace OpenGlass::uDWM
 		}
 	};
 
+	// Opaque native record strides are verified by the array/vector operations.
+	// Private fields use Layouts; native uDWM retains record/resource ownership.
+	struct LivePreviewVisual
+	{
+	private:
+		alignas(void*) std::byte m_storage[40];
+
+	public:
+		inline CWindowData* GetWindowData() const
+		{
+			return LivePreviewVisual_WindowData.read(this);
+		}
+		inline CTopLevelWindow*& GetGlassClone()
+		{
+			return LivePreviewVisual_GlassClone.ref(this);
+		}
+	};
+	// Complete CVisualBrush value ABI: a composition brush and its visual surface.
+	struct LivePreviewBrush
+	{
+		winrt::com_ptr<abi::ICompositionSurfaceBrush> brush;
+		winrt::com_ptr<abi::ICompositionVisualSurface> surface;
+	};
+	struct LivePreviewResource
+	{
+	private:
+		alignas(void*) std::byte m_storage[96];
+
+	public:
+		inline CSolidRectangleVisual* GetNormalVisual() const
+		{
+			return LivePreviewResource_NormalVisual.read(this);
+		}
+		inline CSolidRectangleVisual* GetGlassVisual() const
+		{
+			return LivePreviewResource_GlassVisual.read(this);
+		}
+		inline const RECT& GetGlassRect() const
+		{
+			return *LivePreviewResource_GlassRect.address(this);
+		}
+		inline const RECT& GetMonitorRect() const
+		{
+			return *LivePreviewResource_MonitorRect.address(this);
+		}
+		inline void ResetCaptures()
+		{
+			LivePreviewResource_NormalBrush.ref(this) = {};
+			LivePreviewResource_GlassBrush.ref(this) = {};
+		}
+	};
+	static_assert(sizeof(LivePreviewVisual) == 40);
+	static_assert(sizeof(LivePreviewBrush) == 16);
+	static_assert(sizeof(LivePreviewResource) == 96);
+	struct CLivePreviewTimeline
+	{
+		inline double GetCurrentOpacity()
+		{
+			OPENGLASS_MUSTTAIL return Projection::Invoke<&CLivePreviewTimeline::GetCurrentOpacity>(this);
+		}
+	};
+	struct CLivePreview : CContainerVisual
+	{
+		inline auto GetWindows()
+		{
+			return CLivePreview_AnimatedWindows.ref(this).views();
+		}
+		inline auto GetResources()
+		{
+			return std::span(CLivePreview_ResourcesBegin.read(this), CLivePreview_ResourcesEnd.read(this));
+		}
+		inline CLivePreviewTimeline* GetTimeline() const
+		{
+			return CLivePreview_Timeline.read(this);
+		}
+		inline CContainerVisual* GetGlassRoot() const
+		{
+			return CLivePreview_GlassRoot.read(this);
+		}
+		inline HRESULT UpdateResources()
+		{
+			OPENGLASS_MUSTTAIL return Projection::Invoke<&CLivePreview::UpdateResources>(this);
+		}
+	};
+
 	struct CWindowList : CBaseObject
 	{
 #if defined(_M_ARM64)
 		// ARM64 uDWM only keeps GetWindowListForDesktop as inlined copies, so the
-		// equivalent desktop-map lookup lives in GlassKernel.cpp where the projected
+		// equivalent desktop-map lookup lives in GlassInfra.cpp where the projected
 		// Symbol handles are visible: CGenericTableMap<unsigned __int64,
 		// CWindowList::DESKTOP_WINDOWLIST_MAP_ENTRY>::FindElement.
 		PRLIST_ENTRY GetWindowListForDesktop(ULONG_PTR desktopID);
@@ -593,6 +836,10 @@ namespace OpenGlass::uDWM
 	};
 	struct CDesktopManager
 	{
+		inline CLivePreview* GetLivePreview() const
+		{
+			return CDesktopManager_LivePreview.read(this);
+		}
 		inline static CDesktopManager** s_pDesktopManagerInstance{ nullptr };
 		inline static LPCRITICAL_SECTION s_csDwmInstance{ nullptr };
 
@@ -669,7 +916,7 @@ namespace OpenGlass::uDWM
 		}
 	}
 
-	inline uDWM::CTopLevelWindow* TryGetWindowFromVisual(uDWM::CVisual* visual)
+	inline uDWM::CTopLevelWindow* TryGetWindowFromVisual(const uDWM::CVisual* visual)
 	{
 		auto current = visual->GetTransformParent();
 
@@ -682,6 +929,10 @@ namespace OpenGlass::uDWM
 	}
 
 	using CTopLevelWindow_EdgeBorderMustBeOpaque_t = int(*)(CTopLevelWindow*);
+	using CAccent__IsAcrylicBlurEnabledAndAllowed_t = bool(*)(const CAccent*);
+	using CAccent__UpdateSolidFill_t = HRESULT(*)(CAccent*, CNineGridVisual*, ULONG, const RECT&, float);
+	using CAccent__CleanupNonStaticsResources_t = void(*)(CAccent*);
+	using CLivePreview__FadeOutToGlass_t = HRESULT(*)(CLivePreview*);
 	using CGlassColorizationParameters_AdjustWindowColorization_t = void(*)(
 		CGlassColorizationParameters*,
 		const GpCC*,
@@ -690,12 +941,12 @@ namespace OpenGlass::uDWM
 	);
 	struct CGraphicsDeviceManager;
 	using CVisual_UpdateOffset_t = HRESULT(*)(CVisual*);
-	using CVisual_SendSetOffset_t = HRESULT(*)(CVisual*, const POINT&);
 	using CSpriteVisual_SendSetSize_t = HRESULT(*)(CSpriteVisual*, const SIZE&);
 	using CSpriteVisual_CloneVisualTree_t = HRESULT(*)(CSpriteVisual*, CVisual**, UINT);
 	using CDWriteText_ValidateVisual_t = HRESULT(*)(CDWriteText*);
 	using CDWriteText_InitializeVisualTreeClone_t = HRESULT(*)(CDWriteText*, CDWriteText*, UINT);
-	using CThemePartPrimitive_ShouldClone_t = bool(*)(CThemePartPrimitive*, BYTE);
+	using CThemePartPrimitive_ShouldClone_t = bool(*)(CThemePartPrimitive*, UINT);
+	using CThemePartPrimitive_ClonePrimitive_t = HRESULT(*)(CThemePartPrimitive*, CPrimitive**, UINT);
 	using CLegacyNonClientBackground_HasSomethingToRender_t = bool(*)(CLegacyNonClientBackground*);
 	using CLegacyNonClientBackground_SetCaptionRect_t = HRESULT(*)(CLegacyNonClientBackground*, LPCRECT);
 	using CLegacyNonClientBackground_SetBorderRects_t = HRESULT(*)(CLegacyNonClientBackground*, LPCRECT, LPCRECT);
@@ -704,7 +955,6 @@ namespace OpenGlass::uDWM
 	using CTopLevelWindow_UpdateNCAreaBackground_t = HRESULT(*)(CTopLevelWindow*);
 	using CTopLevelWindow_UpdateNCAreaPositionsAndSizes_t = HRESULT(*)(CTopLevelWindow*);
 	using CTopLevelWindow_UpdateClientBlur_t = HRESULT(*)(CTopLevelWindow*);
-	using CTopLevelWindow_ValidateVisual_t = HRESULT(*)(CTopLevelWindow*);
 	using CTopLevelWindow_UpdateWindowVisuals_t = HRESULT(*)(CTopLevelWindow*);
 	using CTopLevelWindow_Destructor_t = void(*)(CTopLevelWindow*);
 	using CTopLevelWindow_IsShadowNCAreaPart_t = bool(*)(UINT);

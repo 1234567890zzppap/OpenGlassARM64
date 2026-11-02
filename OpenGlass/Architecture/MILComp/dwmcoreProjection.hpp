@@ -419,7 +419,7 @@ namespace OpenGlass::dwmcore
 	using CDrawingContext_DrawVisualTree_t = HRESULT(*)(
 		CDrawingContext*,
 		CVisualTree*,
-		const D2D1_RECT_F&,
+		const MilRect3D&,
 		const COcclusionContext*,
 		int,
 		float,
@@ -463,6 +463,14 @@ namespace OpenGlass::dwmcore
 		const CMILMatrix*,
 		const DWM::span<CVisual>&
 	);
+
+	// The native owner of glass occlusion differs between compositor architectures.
+	using GlassOcclusionContext = COcclusionContext;
+
+	inline bool IsGlassOccluded(const GlassOcclusionContext* context, const D2D1_RECT_F& coverage, int depth)
+	{
+		return context->IsOccluded(coverage, depth, true);
+	}
 
 } // namespace OpenGlass::dwmcore
 

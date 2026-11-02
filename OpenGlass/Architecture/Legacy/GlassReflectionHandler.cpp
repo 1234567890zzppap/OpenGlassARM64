@@ -4,7 +4,7 @@
 #include "dwmcoreProjection.hpp"
 #include "Shared.hpp"
 #include "GlassReflectionBrush.hpp"
-#include "GlassKernel.hpp"
+#include "GlassInfra.hpp"
 #include "DetourChains.hpp"
 
 using namespace OpenGlass;
@@ -48,6 +48,7 @@ namespace OpenGlass::GlassReflectionHandler
 		const D2D1_RECT_F* dstRect,
 		float opacity
 	);
+#if !defined(_M_ARM64)
 	HRESULT MyCRenderData_DrawImageResource_FillMode_Win11_24H2(
 		dwmcore::CDrawingContext* drawingContext,
 		dwmcore::CDrawListEntryBuilder* drawListEntryBuilder,
@@ -56,6 +57,7 @@ namespace OpenGlass::GlassReflectionHandler
 		const D2D1_RECT_F* dstRect,
 		float opacity
 	);
+#endif
 	const D2D1_RECT_F* AdjustLivePreviewSourceRect(const D2D1_RECT_F* srcRect) noexcept;
 
 	void MyCAnimatedGlassSheet_OnRectUpdated(uDWM::CAnimatedGlassSheet* This, LPCRECT lprc);
@@ -63,25 +65,31 @@ namespace OpenGlass::GlassReflectionHandler
 
 	HRESULT MyCLivePreview__FadeOutToGlass(uDWM::CLivePreview* This);
 	HRESULT MyCLivePreview__UpdateInstructions(uDWM::CLivePreview* This);
+#if !defined(_M_ARM64)
 	HRESULT MyCLivePreview__UpdateResourcesForMonitorHelper(
 		uDWM::CLivePreview* This,
 		const uDWM::CTopLevelWindow* window,
 		uDWM::LivePreviewResource* resource
 	);
+#endif
 	
 	DetourChains::RenderDataTryDrawCommandAsDrawListWin10ReflectionNode g_CRenderData_TryDrawCommandAsDrawList_Win10_Org{};
 	DetourChains::RenderDataTryDrawCommandAsDrawListWin11ReflectionNode g_CRenderData_TryDrawCommandAsDrawList_Win11_Org{};
 	Projection::Detour<dwmcore::Symbol_CRenderData_DrawImageResource_FillMode_Pre_19041, &MyCRenderData_DrawImageResource_FillMode_Pre_W10_2004> g_CRenderData_DrawImageResource_FillMode_Pre_W10_2004_Org{};
 	Projection::Detour<dwmcore::Symbol_CRenderData_DrawImageResource_FillMode_19041, &MyCRenderData_DrawImageResource_FillMode_Win10> g_CRenderData_DrawImageResource_FillMode_Win10_Org{};
 	Projection::Detour<dwmcore::Symbol_CRenderData_DrawImageResource_FillMode_22000, &MyCRenderData_DrawImageResource_FillMode_Win11_Pre_24H2> g_CRenderData_DrawImageResource_FillMode_Win11_Pre_24H2_Org{};
+#if !defined(_M_ARM64)
 	Projection::Detour<dwmcore::Symbol_CRenderData_DrawImageResource_FillMode_26100_2454, &MyCRenderData_DrawImageResource_FillMode_Win11_24H2> g_CRenderData_DrawImageResource_FillMode_Win11_24H2_Org{};
+#endif
 
 	Projection::Detour<uDWM::Symbol_CAnimatedGlassSheet_OnRectUpdated, &MyCAnimatedGlassSheet_OnRectUpdated> g_CAnimatedGlassSheet_OnRectUpdated_Org{};
 	Projection::Detour<uDWM::Symbol_CAnimatedGlassSheet__CAnimatedGlassSheet, &MyCAnimatedGlassSheet_Destructor> g_CAnimatedGlassSheet_Destructor_Org{};
 
 	Projection::Detour<uDWM::Symbol_CLivePreview__FadeOutToGlass, &MyCLivePreview__FadeOutToGlass> g_CLivePreview__FadeOutToGlass_Org{};
 	Projection::Detour<uDWM::Symbol_CLivePreview__UpdateInstructions, &MyCLivePreview__UpdateInstructions> g_CLivePreview__UpdateInstructions_Org{};
+#if !defined(_M_ARM64)
 	Projection::Detour<uDWM::Symbol_CLivePreview__UpdateResourcesForMonitorHelper, &MyCLivePreview__UpdateResourcesForMonitorHelper> g_CLivePreview__UpdateResourcesForMonitorHelper_Org{};
+#endif
 
 	bool g_fixLivePreviewRendering{ false };
 	
@@ -207,7 +215,7 @@ HRESULT GlassReflectionHandler::MyCRenderData_TryDrawCommandAsDrawList(
 	T&& callback
 )
 {
-	const auto isDrawGeometryCommand = GlassKernel::IsDrawGeometryCommand(commandType, resources);
+	const auto isDrawGeometryCommand = GlassInfra::IsDrawGeometryCommand(commandType, resources);
 	const auto command = reinterpret_cast<const dwmcore::CDrawGeometryCommand*>(resources->data);
 	if (
 		isDrawGeometryCommand &&
@@ -404,6 +412,7 @@ HRESULT GlassReflectionHandler::MyCRenderData_DrawImageResource_FillMode_Win11_P
 	);
 }
 
+#if !defined(_M_ARM64)
 HRESULT GlassReflectionHandler::MyCRenderData_DrawImageResource_FillMode_Win11_24H2(
 	dwmcore::CDrawingContext* drawingContext,
 	dwmcore::CDrawListEntryBuilder* drawListEntryBuilder,
@@ -422,6 +431,7 @@ HRESULT GlassReflectionHandler::MyCRenderData_DrawImageResource_FillMode_Win11_2
 		opacity
 	);
 }
+#endif
 
 void GlassReflectionHandler::MyCAnimatedGlassSheet_OnRectUpdated(uDWM::CAnimatedGlassSheet* This, LPCRECT lprc)
 {
@@ -629,6 +639,7 @@ HRESULT GlassReflectionHandler::MyCLivePreview__UpdateInstructions(uDWM::CLivePr
 	return hr;
 }
 
+#if !defined(_M_ARM64)
 HRESULT GlassReflectionHandler::MyCLivePreview__UpdateResourcesForMonitorHelper(
 	uDWM::CLivePreview* This,
 	const uDWM::CTopLevelWindow* window,
@@ -639,18 +650,19 @@ HRESULT GlassReflectionHandler::MyCLivePreview__UpdateResourcesForMonitorHelper(
 
 	if (!build_before_w11_24h2)
 	{
-		GlassKernel::g_redirectFirstCreateRectRgnCall = true;
-		GlassKernel::g_window = window;
+		GlassInfra::g_redirectFirstCreateRectRgnCall = true;
+		GlassInfra::g_window = window;
 	}
 	const auto result = g_CLivePreview__UpdateResourcesForMonitorHelper_Org(This, window, resource);
 	if (!build_before_w11_24h2)
 	{
-		GlassKernel::g_window = nullptr;
-		GlassKernel::g_redirectFirstCreateRectRgnCall = std::nullopt;
+		GlassInfra::g_window = nullptr;
+		GlassInfra::g_redirectFirstCreateRectRgnCall = std::nullopt;
 	}
 
 	return result;
 }
+#endif
 
 void GlassReflectionHandler::Update([[maybe_unused]] GlassEngine::UpdateType type)
 {
@@ -675,12 +687,16 @@ void GlassReflectionHandler::Startup()
 			{ &g_CRenderData_DrawImageResource_FillMode_Pre_W10_2004_Org, build_before_w10_2004 },
 			{ &g_CRenderData_DrawImageResource_FillMode_Win10_Org, !build_before_w10_2004 && dwmcore_build_before_w11_21h2 },
 			{ &g_CRenderData_DrawImageResource_FillMode_Win11_Pre_24H2_Org, !dwmcore_build_before_w11_21h2 && build_before_w11_24h2 },
+#if !defined(_M_ARM64)
 			{ &g_CRenderData_DrawImageResource_FillMode_Win11_24H2_Org, !build_before_w11_24h2 },
+#endif
 
 			{ &g_CAnimatedGlassSheet_OnRectUpdated_Org, udwm_build_before_w11_21h2 },
 			{ &g_CAnimatedGlassSheet_Destructor_Org, udwm_build_before_w11_21h2 },
 			{ &g_CLivePreview__UpdateInstructions_Org, udwm_build_before_w11_21h2 },
+#if !defined(_M_ARM64)
 			{ &g_CLivePreview__UpdateResourcesForMonitorHelper_Org, uDWM::g_versionInfo.build >= os::build_w11_24h2 },
+#endif
 
 			{ &g_CLivePreview__FadeOutToGlass_Org, !udwm_build_before_w11_21h2 }
 		}
@@ -706,12 +722,16 @@ void GlassReflectionHandler::Shutdown()
 			{ &g_CRenderData_DrawImageResource_FillMode_Pre_W10_2004_Org, build_before_w10_2004 },
 			{ &g_CRenderData_DrawImageResource_FillMode_Win10_Org, !build_before_w10_2004 && dwmcore_build_before_w11_21h2 },
 			{ &g_CRenderData_DrawImageResource_FillMode_Win11_Pre_24H2_Org, !dwmcore_build_before_w11_21h2 && build_before_w11_24h2 },
+#if !defined(_M_ARM64)
 			{ &g_CRenderData_DrawImageResource_FillMode_Win11_24H2_Org, !build_before_w11_24h2 },
+#endif
 
 			{ &g_CAnimatedGlassSheet_OnRectUpdated_Org, udwm_build_before_w11_21h2 },
 			{ &g_CAnimatedGlassSheet_Destructor_Org, udwm_build_before_w11_21h2 },
 			{ &g_CLivePreview__UpdateInstructions_Org, udwm_build_before_w11_21h2 },
+#if !defined(_M_ARM64)
 			{ &g_CLivePreview__UpdateResourcesForMonitorHelper_Org, uDWM::g_versionInfo.build >= os::build_w11_24h2 },
+#endif
 
 			{ &g_CLivePreview__FadeOutToGlass_Org, !udwm_build_before_w11_21h2 }
 		}

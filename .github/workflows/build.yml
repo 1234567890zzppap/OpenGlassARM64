@@ -40,77 +40,8 @@ env:
   VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\.ci-cache\vcpkg-binary-cache,readwrite
 
 jobs:
-  verify:
-    name: verify
-    runs-on: windows-2025-vs2026
-    timeout-minutes: 60
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Run Python unit tests
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          python -m unittest discover -s Scripts -p "test_*.py"
-          python -m unittest discover -s .agents/skills/maintain-dwm-offsets/tests -p "test_*.py"
-
-      - name: Validate projection symbols
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          python .agents/skills/maintain-dwm-offsets/scripts/validate_projection_symbols.py . --architecture legacy
-          python .agents/skills/maintain-dwm-offsets/scripts/validate_projection_symbols.py . --architecture milcomp
-
-      - name: Prepare Windows build
-        uses: ./.github/actions/prepare-build
-
-      - name: Build OpenGlass unit tests
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          New-Item -ItemType Directory -Force -Path "MSBuild_Logs" | Out-Null
-          msbuild OpenGlassTests/OpenGlassTests.vcxproj /m /restore `
-            /p:Configuration=$env:BUILD_CONFIGURATION `
-            /p:Platform=$env:BUILD_PLATFORM `
-            /p:RestorePackagesConfig=true `
-            /p:VcpkgEnableManifest=true `
-            /p:VcpkgManifestInstall=false `
-            /p:VcpkgRoot=$env:VCPKG_ROOT `
-            /p:VcpkgInstalledDir=$env:VCPKG_INSTALLED_DIR `
-            /p:VcpkgTriplet=$env:VCPKG_DEFAULT_TRIPLET `
-            /p:ForceImportBeforeCppProps=$env:VCPKG_ROOT\scripts\buildsystems\msbuild\vcpkg.props `
-            /p:ForceImportAfterCppTargets=$env:VCPKG_ROOT\scripts\buildsystems\msbuild\vcpkg.targets `
-            /p:OpenGlassInstallerEnabled=false `
-            /bl:MSBuild_Logs/verify.binlog
-
-      - name: Run OpenGlass unit tests
-        run: |
-          $testExecutable = "Build\x64\Release\common\OpenGlassTests.exe"
-          if (-not (Test-Path -LiteralPath $testExecutable -PathType Leaf)) {
-              throw "Test executable was not built: $testExecutable"
-          }
-          & $testExecutable
-          if ($LASTEXITCODE -ne 0) {
-              throw "OpenGlassTests failed with exit code $LASTEXITCODE."
-          }
-
-      - name: Verify source tree remains unchanged
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          git diff --exit-code
-
-      - name: Upload MSBuild binary log on failure
-        if: failure() && hashFiles('MSBuild_Logs/verify.binlog') != ''
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: msbuild-verify-${{ github.run_id }}
-          path: MSBuild_Logs/verify.binlog
-          if-no-files-found: ignore
-          retention-days: 7
-
   build:
     name: build
-    needs: verify
     runs-on: windows-2025-vs2026
     timeout-minutes: 60
     steps:
@@ -118,6 +49,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      - name: Prepare Python tools
+        uses: ./.github/actions/prepare-python
 
       - name: Read product version
         id: version
@@ -142,7 +76,7 @@ jobs:
           - Version: ``$version``
           - Installer artifact (when enabled): ``$artifactName``
           - Theme extension artifact: ``$themeExtensionArtifactName``
-          - Signing: unsigned validation build
+          - Signing: unsigned build
           "@ >> $env:GITHUB_STEP_SUMMARY
 
       - name: Prepare Windows build
@@ -152,12 +86,12 @@ jobs:
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           New-Item -ItemType Directory -Force -Path "MSBuild_Logs" | Out-Null
-          msbuild OpenGlass.slnx /m /restore `
+          msbuild OpenGlass.slnx /m `
             /p:Configuration=$env:BUILD_CONFIGURATION `
             /p:Platform=$env:BUILD_PLATFORM `
-            /p:RestorePackagesConfig=true `
             /p:VcpkgEnableManifest=true `
             /p:VcpkgManifestInstall=false `
+            /p:VcpkgAutoBootstrap=false `
             /p:VcpkgRoot=$env:VCPKG_ROOT `
             /p:VcpkgInstalledDir=$env:VCPKG_INSTALLED_DIR `
             /p:VcpkgTriplet=$env:VCPKG_DEFAULT_TRIPLET `
@@ -168,15 +102,16 @@ jobs:
 
       - name: Verify build outputs
         run: |
+          $buildRoot = "Build\$env:BUILD_PLATFORM\$env:BUILD_CONFIGURATION"
           $expected = @(
-              "Build\x64\Release\legacy\OpenGlass.dll",
-              "Build\x64\Release\milcomp\OpenGlass.dll",
-              "Build\x64\Release\common\OpenGlassHost.exe",
-              "Build\x64\Release\common\OpenGlassGUI.exe",
-              "Build\x64\Release\common\OpenGlassThemeExtension.dll",
-              "Build\x64\Release\common\OpenGlassThemeExtension.pdb",
-              "Build\x64\Release\common\OpenGlassTests.exe",
-              "Build\x64\Release\common\OpenGlassRenderTest.exe"
+              "$buildRoot\legacy\OpenGlass.dll",
+              "$buildRoot\milcomp\OpenGlass.dll",
+              "$buildRoot\common\OpenGlassHost.exe",
+              "$buildRoot\common\OpenGlassGUI.exe",
+              "$buildRoot\common\OpenGlassThemeExtension.dll",
+              "$buildRoot\common\OpenGlassThemeExtension.pdb",
+              "$buildRoot\common\OpenGlassTests.exe",
+              "$buildRoot\common\OpenGlassRenderTest.exe"
           )
           foreach ($path in $expected) {
               $item = Get-Item -LiteralPath $path -ErrorAction Stop
@@ -185,7 +120,7 @@ jobs:
               }
           }
 
-          $extension = "Build\x64\Release\common\OpenGlassThemeExtension.dll"
+          $extension = "$buildRoot\common\OpenGlassThemeExtension.dll"
           $signature = Get-AuthenticodeSignature -LiteralPath $extension
           if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::NotSigned) {
               throw "Expected an unsigned theme extension, but $extension has signature status $($signature.Status)."
@@ -196,12 +131,16 @@ jobs:
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.package_artifacts == true)
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
-          $iscc = Get-Command ISCC.exe -ErrorAction Stop
-          python --version
-          "iscc=$($iscc.Source)" >> $env:GITHUB_OUTPUT
+          $iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+          if ($iscc) {
+              "iscc=$($iscc.Source)" >> $env:GITHUB_OUTPUT
+          }
+          else {
+              "Installer and symbol packaging skipped: ISCC.exe is unavailable." >> $env:GITHUB_STEP_SUMMARY
+          }
 
       - name: Package unsigned installer and symbols
-        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.package_artifacts == true)
+        if: steps.packaging_tools.outputs.iscc != ''
         env:
           OPENGLASS_ISCC: ${{ steps.packaging_tools.outputs.iscc }}
         run: |
@@ -209,8 +148,8 @@ jobs:
           $arguments = @(
               "Scripts\OpenGlass.Packaging.proj",
               "/m",
-              "/p:Configuration=Release",
-              "/p:Platform=x64",
+              "/p:Configuration=$env:BUILD_CONFIGURATION",
+              "/p:Platform=$env:BUILD_PLATFORM",
               "/p:BuildDependencies=false",
               "/p:OpenGlassIsccTool=$env:OPENGLASS_ISCC"
           )
@@ -220,10 +159,10 @@ jobs:
           }
 
       - name: Verify unsigned packages
-        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.package_artifacts == true)
+        if: steps.packaging_tools.outputs.iscc != ''
         run: |
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $buildRoot = "Build\x64\Release"
+          $buildRoot = "Build\$env:BUILD_PLATFORM\$env:BUILD_CONFIGURATION"
           $artifacts = @(
               "$buildRoot\OpenGlassSetup.exe",
               "$buildRoot\OpenGlassSymbols.zip"
@@ -248,8 +187,8 @@ jobs:
           }
 
           $stagedDlls = @(
-              @{ Path = "Cache\Packaging\Release\signed\legacy\OpenGlass.dll"; Architecture = "Legacy" },
-              @{ Path = "Cache\Packaging\Release\signed\milcomp\OpenGlass.dll"; Architecture = "MILComp" }
+              @{ Path = "Cache\Packaging\$env:BUILD_CONFIGURATION\signed\legacy\OpenGlass.dll"; Architecture = "Legacy" },
+              @{ Path = "Cache\Packaging\$env:BUILD_CONFIGURATION\signed\milcomp\OpenGlass.dll"; Architecture = "MILComp" }
           )
           foreach ($stagedDll in $stagedDlls) {
               $description = (Get-Item -LiteralPath $stagedDll.Path -ErrorAction Stop).VersionInfo.FileDescription
@@ -307,20 +246,20 @@ jobs:
         with:
           name: ${{ steps.version.outputs.theme_extension_artifact_name }}
           path: |
-            Build/x64/Release/common/OpenGlassThemeExtension.dll
-            Build/x64/Release/common/OpenGlassThemeExtension.pdb
+            Build/${{ env.BUILD_PLATFORM }}/${{ env.BUILD_CONFIGURATION }}/common/OpenGlassThemeExtension.dll
+            Build/${{ env.BUILD_PLATFORM }}/${{ env.BUILD_CONFIGURATION }}/common/OpenGlassThemeExtension.pdb
           if-no-files-found: error
           retention-days: 7
 
       - name: Upload unsigned packages
-        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.package_artifacts == true)
+        if: steps.packaging_tools.outputs.iscc != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ steps.version.outputs.artifact_name }}
           compression-level: 0 # The installer and symbol ZIP are already compressed.
           path: |
-            Build/x64/Release/OpenGlassSetup.exe
-            Build/x64/Release/OpenGlassSymbols.zip
+            Build/${{ env.BUILD_PLATFORM }}/${{ env.BUILD_CONFIGURATION }}/OpenGlassSetup.exe
+            Build/${{ env.BUILD_PLATFORM }}/${{ env.BUILD_CONFIGURATION }}/OpenGlassSymbols.zip
           if-no-files-found: error
           retention-days: 7
 

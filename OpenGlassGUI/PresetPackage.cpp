@@ -23,6 +23,11 @@ namespace OpenGlass::PresetPackages
 		constexpr std::size_t MaximumReportedIgnoredSettings = 64;
 		constexpr std::size_t MaximumReportedSettingNameLength = 160;
 
+		void CheckCancelled(std::stop_token stop)
+		{
+			THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_CANCELLED), stop.stop_requested());
+		}
+
 		std::wstring DisplaySettingName(std::wstring_view value)
 		{
 			std::wstring result;
@@ -91,15 +96,10 @@ namespace OpenGlass::PresetPackages
 
 		std::string Sha256(std::span<const std::byte> bytes)
 		{
-			BCRYPT_ALG_HANDLE algorithm{};
-			THROW_IF_NTSTATUS_FAILED(BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0));
-			const auto closeAlgorithm = wil::scope_exit([&] { BCryptCloseAlgorithmProvider(algorithm, 0); });
-			BCRYPT_HASH_HANDLE hash{};
-			THROW_IF_NTSTATUS_FAILED(BCryptCreateHash(algorithm, &hash, nullptr, 0, nullptr, 0, 0));
-			const auto destroyHash = wil::scope_exit([&] { BCryptDestroyHash(hash); });
-			THROW_IF_NTSTATUS_FAILED(BCryptHashData(hash, reinterpret_cast<PUCHAR>(const_cast<std::byte*>(bytes.data())), static_cast<ULONG>(bytes.size()), 0));
 			std::array<std::byte, 32> digest{};
-			THROW_IF_NTSTATUS_FAILED(BCryptFinishHash(hash, reinterpret_cast<PUCHAR>(digest.data()), static_cast<ULONG>(digest.size()), 0));
+			THROW_IF_NTSTATUS_FAILED(BCryptHash(BCRYPT_SHA256_ALG_HANDLE, nullptr, 0,
+				reinterpret_cast<PUCHAR>(const_cast<std::byte*>(bytes.data())), static_cast<ULONG>(bytes.size()),
+				reinterpret_cast<PUCHAR>(digest.data()), static_cast<ULONG>(digest.size())));
 			return Hex(digest);
 		}
 
@@ -195,8 +195,9 @@ namespace OpenGlass::PresetPackages
 			return (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
 		}
 
-		EntryMap ReadArchiveEntries(const std::filesystem::path& path)
+		EntryMap ReadArchiveEntries(const std::filesystem::path& path, std::stop_token stop)
 		{
+			CheckCancelled(stop);
 			wxFFileInputStream input(path.wstring());
 			THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_FILE_INVALID), !input.IsOk());
 			wxZipInputStream zip(input);
@@ -205,6 +206,7 @@ namespace OpenGlass::PresetPackages
 			std::size_t total{};
 			while (const auto entry = std::unique_ptr<wxZipEntry>(zip.GetNextEntry()))
 			{
+				CheckCancelled(stop);
 				THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_FILE_INVALID), entry->IsDir() || (entry->GetFlags() & 1) != 0);
 				const auto unixType = (entry->GetExternalAttributes() >> 16) & 0170000;
 				THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_FILE_INVALID), unixType != 0 && unixType != 0100000);
@@ -226,6 +228,7 @@ namespace OpenGlass::PresetPackages
 				std::array<std::byte, 64 * 1024> buffer{};
 				for (;;)
 				{
+					CheckCancelled(stop);
 					zip.Read(buffer.data(), buffer.size());
 					const auto count = zip.LastRead();
 					THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE), bytes.size() + count > MaximumEntrySize || total + bytes.size() + count > MaximumTotalSize);
@@ -303,13 +306,21 @@ namespace OpenGlass::PresetPackages
 
 		std::string CalculateContentDigest(const std::string& manifest, const std::string& license, const std::map<std::string, std::vector<std::byte>>& assets)
 		{
-			std::vector<std::byte> content;
+			BCRYPT_HASH_HANDLE hash{};
+			THROW_IF_NTSTATUS_FAILED(BCryptCreateHash(BCRYPT_SHA256_ALG_HANDLE, &hash, nullptr, 0, nullptr, 0, 0));
+			const auto destroyHash = wil::scope_exit([&] { BCryptDestroyHash(hash); });
+			auto update = [&](std::span<const std::byte> bytes)
+			{
+				THROW_IF_NTSTATUS_FAILED(BCryptHashData(hash, reinterpret_cast<PUCHAR>(const_cast<std::byte*>(bytes.data())), static_cast<ULONG>(bytes.size()), 0));
+			};
 			auto append = [&](std::string_view name, std::span<const std::byte> bytes)
 			{
+				// Preserve the existing name/uint64 length/content framing without
+				// allocating another buffer containing all package assets.
 				const auto size = static_cast<std::uint64_t>(bytes.size());
-				content.insert(content.end(), reinterpret_cast<const std::byte*>(name.data()), reinterpret_cast<const std::byte*>(name.data() + name.size()));
-				content.insert(content.end(), reinterpret_cast<const std::byte*>(&size), reinterpret_cast<const std::byte*>(&size + 1));
-				content.insert(content.end(), bytes.begin(), bytes.end());
+				update({ reinterpret_cast<const std::byte*>(name.data()), name.size() });
+				update({ reinterpret_cast<const std::byte*>(&size), sizeof(size) });
+				update(bytes);
 			};
 			append("manifest.json", { reinterpret_cast<const std::byte*>(manifest.data()), manifest.size() });
 			if (!license.empty())
@@ -320,7 +331,9 @@ namespace OpenGlass::PresetPackages
 			{
 				append(name, bytes);
 			}
-			return Sha256(content);
+			std::array<std::byte, 32> digest{};
+			THROW_IF_NTSTATUS_FAILED(BCryptFinishHash(hash, reinterpret_cast<PUCHAR>(digest.data()), static_cast<ULONG>(digest.size()), 0));
+			return Hex(digest);
 		}
 
 		void NormalizeLegacyColors(Package& package)
@@ -362,8 +375,9 @@ namespace OpenGlass::PresetPackages
 				if (Settings::IsWindowsColorBase(spec.id)) package.settings.erase(spec.id);
 		}
 
-		Package ParsePackage(EntryMap entries, const std::filesystem::path& source, bool deployed)
+		Package ParsePackage(EntryMap entries, const std::filesystem::path& source, bool deployed, std::stop_token stop)
 		{
+			CheckCancelled(stop);
 			const auto manifestIt = entries.find("manifest.json");
 			THROW_HR_IF(E_INVALIDARG, manifestIt == entries.end());
 			Package package;
@@ -528,6 +542,7 @@ namespace OpenGlass::PresetPackages
 			THROW_HR_IF(E_INVALIDARG, !assetSpecs.is_object());
 			for (const auto& [path, spec] : assetSpecs.items())
 			{
+				CheckCancelled(stop);
 				const bool knownPath = path == "assets/theme-atlas.png"
 					|| path == "assets/theme-atlas.png.layout"
 					|| path == "assets/reflection.png"
@@ -537,10 +552,11 @@ namespace OpenGlass::PresetPackages
 				THROW_HR_IF(E_INVALIDARG, entry == entries.end());
 				THROW_HR_IF(E_INVALIDARG, spec.at("size").get<std::uint64_t>() != entry->second.size());
 				THROW_HR_IF(E_INVALIDARG, spec.at("sha256").get<std::string>() != Sha256(entry->second));
-				package.assets.emplace(path, entry->second);
+				package.assets.emplace(path, std::move(entry->second));
 			}
 			for (const auto& [path, bytes] : package.assets)
 			{
+				CheckCancelled(stop);
 				if (path.ends_with(".layout"))
 				{
 					ValidateThemeAtlasLayout(bytes);
@@ -557,6 +573,7 @@ namespace OpenGlass::PresetPackages
 			}
 			THROW_HR_IF(E_INVALIDARG, package.assets.contains("assets/theme-atlas.png.layout") && !package.assets.contains("assets/theme-atlas.png"));
 			THROW_HR_IF(E_INVALIDARG, entries.size() != package.assets.size() + 1 + (package.licenseText.empty() ? 0 : 1));
+			CheckCancelled(stop);
 			package.digest = CalculateContentDigest(manifest.dump(), package.licenseText, package.assets);
 			if (schemaVersion < 3) NormalizeLegacyColors(package);
 			if (schemaVersion < 3 && std::ranges::any_of(package.settings, [](const auto& item) { return std::holds_alternative<std::monostate>(item.second); }))
@@ -564,14 +581,16 @@ namespace OpenGlass::PresetPackages
 			return package;
 		}
 
-		EntryMap ReadDeployedEntries(const std::filesystem::path& directory)
+		EntryMap ReadDeployedEntries(const std::filesystem::path& directory, std::stop_token stop)
 		{
+			CheckCancelled(stop);
 			THROW_HR_IF(E_INVALIDARG, !std::filesystem::is_directory(directory) || IsReparsePoint(directory));
 			EntryMap entries;
 			std::set<std::string, std::less<>> names;
 			std::size_t total{};
 			for (const auto& path : std::filesystem::recursive_directory_iterator(directory))
 			{
+				CheckCancelled(stop);
 				THROW_HR_IF(E_INVALIDARG, IsReparsePoint(path.path()));
 				if (path.is_directory()) continue;
 				THROW_HR_IF(E_INVALIDARG, !path.is_regular_file() || entries.size() >= MaximumEntryCount);
@@ -585,10 +604,9 @@ namespace OpenGlass::PresetPackages
 				THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE), size > MaximumEntrySize || total + size > MaximumTotalSize);
 				std::ifstream stream(path.path(), std::ios::binary);
 				THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_READ_FAULT), !stream);
-				std::vector<char> chars((std::istreambuf_iterator<char>(stream)), {});
-				THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_READ_FAULT), chars.size() != size);
-				std::vector<std::byte> bytes(chars.size());
-				if (!chars.empty()) std::memcpy(bytes.data(), chars.data(), chars.size());
+				std::vector<std::byte> bytes(static_cast<std::size_t>(size));
+				stream.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+				THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_READ_FAULT), !stream || stream.peek() != std::char_traits<char>::eof());
 				entries.emplace(relative, std::move(bytes));
 				total += size;
 			}
@@ -718,14 +736,14 @@ namespace OpenGlass::PresetPackages
 		return L"Custom license";
 	}
 
-	Package LoadArchive(const std::filesystem::path& path)
+	Package LoadArchive(const std::filesystem::path& path, std::stop_token stop)
 	{
-		return ParsePackage(ReadArchiveEntries(path), path, false);
+		return ParsePackage(ReadArchiveEntries(path, stop), path, false, stop);
 	}
 
-	Package LoadDeployed(const std::filesystem::path& directory)
+	Package LoadDeployed(const std::filesystem::path& directory, std::stop_token stop)
 	{
-		auto package = ParsePackage(ReadDeployedEntries(directory), directory, true);
+		auto package = ParsePackage(ReadDeployedEntries(directory, stop), directory, true, stop);
 		for (const auto& [name, bytes] : package.assets) package.assetSources.emplace(name, directory / PathFromUtf8(name));
 		return package;
 	}
@@ -830,9 +848,9 @@ namespace OpenGlass::PresetPackages
 		{
 			ManagedFiles::Write(path, { reinterpret_cast<const std::byte*>(text.data()), text.size() });
 		}
-		Package ReadEntry(const std::filesystem::path& path)
+		Package ReadEntry(const std::filesystem::path& path, std::stop_token stop = {})
 		{
-			auto package = LoadDeployed(path);
+			auto package = LoadDeployed(path, stop);
 			package.libraryId = path.filename().string();
 			const auto recordPath = path / L".accepted.json";
 			if (std::filesystem::exists(recordPath))
@@ -864,12 +882,14 @@ namespace OpenGlass::PresetPackages
 			THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_FILE_INVALID), LoadDeployed(path).digest != package.digest);
 			TextFile(path / L".accepted.json", nlohmann::json{ { "version", 1 }, { "digest", package.digest }, { "source_type", sourceType } }.dump());
 		}
-		void RecoverLibrary(const std::filesystem::path& root, std::vector<std::wstring>* maintenance = nullptr)
+		void RecoverLibrary(const std::filesystem::path& root, std::vector<std::wstring>* maintenance = nullptr, std::stop_token stop = {})
 		{
+			CheckCancelled(stop);
 			const auto library = root / L"Library";
 			ManagedFiles::Directory(library);
 			for (const auto& item : std::filesystem::directory_iterator(library))
 			{
+				CheckCancelled(stop);
 				const auto name = item.path().filename().string();
 				if (name.ends_with(".previous"))
 				{
@@ -893,6 +913,7 @@ namespace OpenGlass::PresetPackages
 			{
 				for (const auto& record : ReadLibraryIndex(root))
 				{
+					CheckCancelled(stop);
 					if (record.sourceType == "draft") continue;
 					const auto target = library / PathFromUtf8(record.id);
 					if (std::filesystem::exists(target)) continue;
@@ -916,17 +937,20 @@ namespace OpenGlass::PresetPackages
 		}
 	}
 
-	std::vector<Package> EnumerateInstalled(const std::filesystem::path& root, std::vector<std::wstring>* maintenance)
+	std::vector<Package> EnumerateInstalled(const std::filesystem::path& root, std::vector<std::wstring>* maintenance, std::stop_token stop)
 	{
-		auto lock = LockLibrary(root); RecoverLibrary(root, maintenance);
+		CheckCancelled(stop);
+		auto lock = LockLibrary(root); RecoverLibrary(root, maintenance, stop);
 		std::vector<Package> packages;
 		for (const auto& item : std::filesystem::directory_iterator(root / L"Library"))
 		{
+			CheckCancelled(stop);
 			const auto id = item.path().filename().string();
 			if (!IsCanonicalUuid(id)) continue;
-			try { auto package = ReadEntry(item.path()); package.assets.clear(); packages.push_back(std::move(package)); }
+			try { auto package = ReadEntry(item.path(), stop); package.assets.clear(); packages.push_back(std::move(package)); }
 			catch (...)
 			{
+				CheckCancelled(stop); // Cancellation is not an invalid library entry.
 				Package invalid; invalid.libraryId = id; invalid.source = item.path(); invalid.deployed = true;
 				invalid.metadata.name = item.path().filename().wstring();
 				invalid.loadError = std::format(L"Invalid preset (0x{:08X})", static_cast<unsigned long>(wil::ResultFromCaughtException()));
@@ -942,18 +966,19 @@ namespace OpenGlass::PresetPackages
 		return packages;
 	}
 
-	Package LoadLibraryEntry(const Package& entry, const std::filesystem::path& root)
+	Package LoadLibraryEntry(const Package& entry, const std::filesystem::path& root, std::stop_token stop)
 	{
-		auto lock = LockLibrary(root); RecoverLibrary(root);
+		CheckCancelled(stop);
+		auto lock = LockLibrary(root); RecoverLibrary(root, nullptr, stop);
 		THROW_HR_IF(E_INVALIDARG, !IsCanonicalUuid(entry.libraryId));
-		auto result = ReadEntry(root / L"Library" / PathFromUtf8(entry.libraryId));
+		auto result = ReadEntry(root / L"Library" / PathFromUtf8(entry.libraryId), stop);
 		THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_FILE_INVALID), result.digest != entry.digest);
 		return result;
 	}
 
-	Package LoadTrusted(const Package& entry, const std::filesystem::path& root)
+	Package LoadTrusted(const Package& entry, const std::filesystem::path& root, std::stop_token stop)
 	{
-		auto result = LoadLibraryEntry(entry, root);
+		auto result = LoadLibraryEntry(entry, root, stop);
 		THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_FILE_INVALID), !result.trusted);
 		return result;
 	}
@@ -961,7 +986,8 @@ namespace OpenGlass::PresetPackages
 	Package Publish(const Package& input, std::string_view sourceType, std::string_view existingId, const std::filesystem::path& root, std::string_view expectedDigest)
 	{
 		auto lock = LockLibrary(root); RecoverLibrary(root);
-		const auto package = input.deployed ? LoadDeployed(input.source) : input;
+		const auto reloaded = input.deployed ? std::optional{ LoadDeployed(input.source) } : std::nullopt;
+		const auto& package = reloaded ? *reloaded : input;
 		THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_FILE_INVALID), input.digest != package.digest);
 		const auto library = root / L"Library";
 		const auto id = existingId.empty() ? CreateUuid() : std::string(existingId);
@@ -1059,8 +1085,9 @@ namespace OpenGlass::PresetPackages
 		if (origin && (!target || !SameRevision(*target, *origin))) PreserveSource(request, *origin, false);
 	}
 
-	Package CreateSnapshot(CreateRequest request)
+	Package CreateSnapshot(CreateRequest request, std::stop_token stop)
 	{
+		CheckCancelled(stop);
 		if (!request.licenseText.empty())
 		{
 			ValidateLicense(request.licenseText);
@@ -1078,6 +1105,7 @@ namespace OpenGlass::PresetPackages
 		std::uint64_t assetSize{};
 		for (const auto& [name, source] : request.assetSources)
 		{
+			CheckCancelled(stop);
 			THROW_HR_IF(E_INVALIDARG, !name.starts_with("assets/") || !IsSafeEntryPath(name));
 			THROW_HR_IF(E_INVALIDARG, IsReparsePoint(source));
 			const auto size = std::filesystem::file_size(source);
@@ -1093,7 +1121,8 @@ namespace OpenGlass::PresetPackages
 			assets.emplace(name, std::move(bytes));
 		}
 		const auto manifest = BuildManifest(request, assets);
-		EntryMap entries(assets.begin(), assets.end());
+		EntryMap entries;
+		entries.merge(assets);
 		auto addText = [&](const std::string& name, const std::string& text)
 		{
 			std::vector<std::byte> bytes(text.size());
@@ -1105,15 +1134,16 @@ namespace OpenGlass::PresetPackages
 		std::size_t total{};
 		for (const auto& [_, bytes] : entries) total += bytes.size();
 		THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE), total > MaximumTotalSize || entries.size() > MaximumEntryCount);
-		auto package = ParsePackage(std::move(entries), {}, false);
+		auto package = ParsePackage(std::move(entries), {}, false, stop);
 		package.assetSources = std::move(request.assetSources);
 		return package;
 	}
 
 	void ExportArchive(const std::filesystem::path& path, const Package& input)
 	{
-		const auto package = !input.libraryId.empty() ? LoadTrusted(input, input.source.parent_path().parent_path())
-			: input.deployed ? LoadDeployed(input.source) : input;
+		const auto reloaded = !input.libraryId.empty() ? std::optional{ LoadTrusted(input, input.source.parent_path().parent_path()) }
+			: input.deployed ? std::optional{ LoadDeployed(input.source) } : std::nullopt;
+		const auto& package = reloaded ? *reloaded : input;
 		THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_FILE_INVALID), package.digest != input.digest);
 		const auto& manifest = package.manifestText;
 		const auto& assets = package.assets;

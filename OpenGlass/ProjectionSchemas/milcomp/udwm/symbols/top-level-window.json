@@ -1,0 +1,258 @@
+{
+  "symbols": [
+    {
+      "name": "Symbol_CTopLevelWindow_vftable",
+      "id": "CTopLevelWindow::vftable",
+      "bindings": [
+        {
+          "platform": null,
+          "target": "&CTopLevelWindow::vftable",
+          "ranges": [
+            {
+              "symbol_names": [
+                "const CTopLevelWindow::`vftable'"
+              ],
+              "min_inclusive": null,
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "projected_variable"
+    },
+    {
+      "name": "Symbol_CTopLevelWindow_GetActualWindowRect",
+      "id": "CTopLevelWindow::GetActualWindowRect",
+      "bindings": [
+        {
+          "platform": null,
+          "target": "&CTopLevelWindow::GetActualWindowRect",
+          "ranges": [
+            {
+              "symbol_names": [
+                "public: struct tagRECT __cdecl CTopLevelWindow::GetActualWindowRect(bool,bool,bool)const __ptr64"
+              ],
+              "min_inclusive": null,
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "projected_function"
+    },
+    {
+      "name": "Symbol_CTopLevelWindow_TreatAsActiveWindow",
+      "id": "CTopLevelWindow::TreatAsActiveWindow",
+      "bindings": [
+        {
+          "platform": null,
+          "target": "&CTopLevelWindow::TreatAsActiveWindow",
+          "ranges": [
+            {
+              "symbol_names": [
+                "private: bool __cdecl CTopLevelWindow::TreatAsActiveWindow(void)const __ptr64"
+              ],
+              "min_inclusive": null,
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "projected_function"
+    },
+    {
+      "name": "Symbol_CTopLevelWindow_OnBlurBehindUpdated",
+      "id": "CTopLevelWindow::OnBlurBehindUpdated",
+      "bindings": [
+        {
+          "platform": null,
+          "target": "&CTopLevelWindow::OnBlurBehindUpdated",
+          "ranges": [
+            {
+              "symbol_names": [
+                "public: void __cdecl CTopLevelWindow::OnBlurBehindUpdated(void) __ptr64"
+              ],
+              "min_inclusive": null,
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "projected_function"
+    },
+    {
+      "name": "Symbol_CTopLevelWindow_OnSystemBackdropUpdated",
+      "id": "CTopLevelWindow::OnSystemBackdropUpdated",
+      "bindings": [
+        {
+          "platform": null,
+          "target": "&CTopLevelWindow::OnSystemBackdropUpdated",
+          "ranges": [
+            {
+              "symbol_names": [
+                "public: void __cdecl CTopLevelWindow::OnSystemBackdropUpdated(void) __ptr64"
+              ],
+              "min_inclusive": null,
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "projected_function"
+    },
+    {
+      "name": "Symbol_CTopLevelWindow_UpdateClientBlur",
+      "id": "CTopLevelWindow::UpdateClientBlur",
+      "bindings": [
+        {
+          "platform": null,
+          "type": "CTopLevelWindow_UpdateClientBlur_t",
+          "ranges": [
+            {
+              "symbol_names": [
+                "private: long __cdecl CTopLevelWindow::UpdateClientBlur(void) __ptr64"
+              ],
+              "min_inclusive": null,
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "raw"
+    },
+    {
+      "name": "Symbol_CTopLevelWindow_ValidateVisual",
+      "id": "CTopLevelWindow::ValidateVisual",
+      "bindings": [
+        {
+          "platform": null,
+          "type": "HRESULT (*)(CTopLevelWindow*)",
+          "ranges": [
+            {
+              "symbol_names": [
+                "public: virtual long __cdecl CTopLevelWindow::ValidateVisual(void) __ptr64"
+              ],
+              "min_inclusive": null,
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "raw"
+    },
+    {
+      "name": "Symbol_CTopLevelWindow_UpdateWindowVisuals",
+      "id": "CTopLevelWindow::UpdateWindowVisuals",
+      "bindings": [
+        {
+          "platform": "x64",
+          "type": "CTopLevelWindow_UpdateWindowVisuals_t",
+          "ranges": [
+            {
+              "symbol_names": [
+                "private: long __cdecl CTopLevelWindow::UpdateWindowVisuals(void) __ptr64"
+              ],
+              "min_inclusive": null,
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "raw"
+    },
+    {
+      "name": "Symbol_CTopLevelWindow_CTopLevelWindow",
+      "id": "CTopLevelWindow::~CTopLevelWindow",
+      "bindings": [
+        {
+          "platform": null,
+          "type": "CTopLevelWindow_Destructor_t",
+          "ranges": [
+            {
+              "symbol_names": [
+                "private: virtual __cdecl CTopLevelWindow::~CTopLevelWindow(void) __ptr64"
+              ],
+              "min_inclusive": null,
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "raw"
+    },
+    {
+      "name": "Symbol_CTopLevelWindow_CloneVisualTreeForLivePreview",
+      "id": "CTopLevelWindow::CloneVisualTreeForLivePreview",
+      "bindings": [
+        {
+          "platform": null,
+          "target": "&CTopLevelWindow::CloneVisualTreeForLivePreview",
+          "ranges": [
+            {
+              "symbol_names": [
+                "public: long __cdecl CTopLevelWindow::CloneVisualTreeForLivePreview(bool,class CTopLevelWindow * __ptr64 * __ptr64) __ptr64"
+              ],
+              "min_inclusive": null,
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "projected_function"
+    },
+    {
+      "name": "Symbol_CTopLevelWindow_OnAccentPolicyUpdated",
+      "id": "CTopLevelWindow::OnAccentPolicyUpdated",
+      "bindings": [
+        {
+          "platform": null,
+          "target": "&CTopLevelWindow::OnAccentPolicyUpdated",
+          "ranges": [
+            {
+              "symbol_names": [
+                "public: void __cdecl CTopLevelWindow::OnAccentPolicyUpdated(void) __ptr64"
+              ],
+              "min_inclusive": null,
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "projected_function",
+      "notes": "28000.3231 derives parent visibility from CWindowData and calls UpdateAccent, which refreshes the existing CAccent from the unchanged window policy. Use the native update during redraw so setting changes and shutdown restore the correct acrylic/solid path."
+    },
+    {
+      "name": "Symbol_CWindowData_OnWindowSizeUpdated",
+      "id": "CWindowData::OnWindowSizeUpdated",
+      "bindings": [
+        {
+          "platform": null,
+          "target": "&CWindowData::OnWindowSizeUpdated",
+          "ranges": [
+            {
+              "symbol_names": [
+                "public: long __cdecl CWindowData::OnWindowSizeUpdated(void) __ptr64"
+              ],
+              "min_inclusive": null,
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "projected_function",
+      "notes": "28000.1/3231 update top-level border placement, dispatch to the native capture manager, then notify secondary representations and destination thumbnails. Native code retains capture-manager selection and resource ownership."
+    }
+  ]
+}

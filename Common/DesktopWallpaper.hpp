@@ -6,6 +6,8 @@ namespace OpenGlass
 {
 	// IDesktopWallpaper occupies slots 0..18. The private methods below are
 	// slots 19..24 in shell32 10.0.17763.737 and 10.0.26100.9549.
+	// In these samples, ComputeImageColorizationColor checks Automatic mode
+	// before refreshing its cached image color.
 	DECLARE_INTERFACE_IID_(IDesktopWallpaperPrivate, IDesktopWallpaper, "C182461F-DFAC-4375-AB6E-4CC45AA7F9CC")
 	{
 		virtual HRESULT STDMETHODCALLTYPE SetWallpaperNoGP(PCWSTR monitor, PCWSTR wallpaper) = 0;

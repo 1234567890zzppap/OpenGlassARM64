@@ -8,6 +8,7 @@
 #include "Symbols.hpp"
 #include "PresetPackage.hpp"
 #include "ConfigurationResources.hpp"
+#include "UxMitigation.hpp"
 
 namespace OpenGlass
 {
@@ -18,6 +19,7 @@ namespace OpenGlass
 	{
 	public:
 		MainFrame(std::wstring userSid, Settings::Scope scope, bool systemTransparency);
+		bool Destroy() override;
 
 	private:
 		void CreateControls();
@@ -33,6 +35,9 @@ namespace OpenGlass
 
 		void BindEvents();
 		void LoadSettings();
+		void LoadCaptionColors(bool inheritedOnly = false);
+		void LoadOpacitySettings(bool reflection, bool inheritedOnly = false);
+		void LoadColorizationBalances();
 		bool CanSyncExternalChanges() const;
 		void SyncExternalChanges();
 		bool RevertSettings();
@@ -58,12 +63,10 @@ namespace OpenGlass
 		void ApplyColorizationBalances(DWORD argb);
 		void ApplyColorizationColor(std::optional<DWORD> argb, ColorizationPresets::Family family);
 		void ApplyColorizationPreset(const ColorizationPresets::Preset& preset);
-		[[nodiscard]] const ColorizationPresets::Preset* FindMatchingWindows7Preset(bool opaque) const;
 		void UpdateColorizationPresetSelection();
 		void QueueColorizationRefresh();
 		WXLRESULT MSWWindowProc(WXUINT message, WXWPARAM wParam, WXLPARAM lParam) override;
 		bool m_colorizationRefreshPending{};
-		bool m_systemColorChangePending{};
 		void NotifySettingsChange(Settings::UpdateType impact = Settings::UpdateType::Backdrop | Settings::UpdateType::Theme);
 		void UpdateUIVisibility();
 		void OnClose(wxCloseEvent& event);
@@ -85,10 +88,14 @@ namespace OpenGlass
 		void FinishSymbolDownload(const SymbolDownloadOutcome& outcome);
 		void RefreshDwmCrashDumpConfiguration();
 		void SetDwmCrashDumpsEnabled(bool enabled);
-		void RefreshPresetPackages();
+		void RefreshPresetPackages(std::string_view selectedId = {});
+		bool RunPresetWork(const wxString& message, const std::function<void(std::stop_token)>& work, bool cancellable = true);
+		bool m_presetWorkActive{};
+		std::stop_source m_presetWorkStop;
 		PresetPackages::PreviewProvenance m_presetProvenance;
 
 		void RebuildPresetPackageList(std::string_view selectedUuid = {});
+		void RebuildPresetPackageImages();
 		void ShowPresetContextMenu(wxPoint screenPosition);
 		void SelectPresetPackageRow(std::size_t row);
 		void UpdatePresetPackageDetails();
@@ -134,6 +141,7 @@ namespace OpenGlass
 		// System Tab
 		wxCheckBox* m_chkDisableGlassOnBattery{ nullptr };
 		wxCheckListBox* m_clDisabledHooks{ nullptr };
+		wxCheckListBox* m_clUxMitigation{ nullptr };
 
 		// Diagnostics Tab
 		wxStaticText* m_lblWindowsTransparencyStatus{ nullptr };
@@ -222,6 +230,10 @@ namespace OpenGlass
 		bool m_customColorsInitialized{ false };
 		wxCheckBox* m_chkEnableTransparency{ nullptr };
 		wxSlider* m_slColorIntensity{ nullptr };
+		wxCollapsiblePane* m_compositionParametersPane{ nullptr };
+		wxSlider* m_slColorBalance{ nullptr };
+		wxSlider* m_slAfterglowBalance{ nullptr };
+		wxSlider* m_slBlurBalance{ nullptr };
 
 		wxChoice* m_chModeColorCaption{ nullptr };
 		wxColourPickerCtrl* m_cpColorCaption{ nullptr };
@@ -283,7 +295,7 @@ namespace OpenGlass
 			bool initialized{ false };
 		};
 		std::vector<PathWarningStatus> m_pathWarnings;
-		std::unique_ptr<RegistryConfig> m_config;
+		RegistryConfig* m_config{}; // Selected view of the two owned registry layers.
 		std::unique_ptr<RegistryConfig> m_userConfig;
 		std::unique_ptr<RegistryConfig> m_systemConfig;
 		bool m_isAdmin{ false };
@@ -293,5 +305,6 @@ namespace OpenGlass
 		bool m_symbolDownloadRunning{ false };
 		bool m_closeWhenSymbolDownloadStops{ false };
 		std::jthread m_symbolDownloadThread{};
+		bool m_configurationOperationActive{};
 	};
 }

@@ -1,0 +1,58 @@
+{
+  "layouts": [
+    {
+      "name": "CSecondaryWindowRepresentation_Data",
+      "id": "CSecondaryWindowRepresentation.Data",
+      "kind": "field",
+      "type": "CWindowData*",
+      "cases": [
+        {
+          "platform": null,
+          "ranges": [
+            {
+              "offset": 64,
+              "otherwise": true
+            }
+          ]
+        }
+      ],
+      "notes": "CalculateWindowMetrics selects the represented CWindowData from +64. OnMarginsOrSizeUpdated independently uses the same pointer before recomputing cached source metrics; the constructor initializes it to null. Verified on 22621.6630 and 26100.8972."
+    },
+    {
+      "name": "CSecondaryWindowRepresentation_Kind",
+      "id": "CSecondaryWindowRepresentation.Kind",
+      "kind": "field",
+      "type": "UINT",
+      "cases": [
+        {
+          "platform": null,
+          "ranges": [
+            {
+              "offset": 72,
+              "otherwise": true
+            }
+          ]
+        }
+      ],
+      "notes": "CalculateWindowMetrics distinguishes live (1), snapshot/proxy (2), and iconic (3) representations using this DWORD. OnMarginsOrSizeUpdated and the native SWR notification independently select the same kinds; construction zeros +72. Verified on 22621.6630 and 26100.8972."
+    },
+    {
+      "name": "CSecondaryWindowRepresentation_Flags",
+      "id": "CSecondaryWindowRepresentation.Flags",
+      "kind": "field",
+      "type": "DWORD",
+      "cases": [
+        {
+          "platform": null,
+          "ranges": [
+            {
+              "offset": 40,
+              "otherwise": true
+            }
+          ]
+        }
+      ],
+      "notes": "Initialize writes the four-byte SWRUsage argument at +40. CalculateWindowMetrics independently tests 0x4 for client-only, 0x80 for special source margins, and 0x100 for bypassing its desktop-source branch. Verified on 22621.6630 and 26100.8972."
+    }
+  ]
+}

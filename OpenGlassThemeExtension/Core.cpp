@@ -256,6 +256,9 @@ namespace OpenGlass
 	}
 }
 
+// Native activation audit, x64 themecpl/themeui 10.0.26100.9549:
+// OpenThemeActionW activates ThemeManager2 through COM; DllInstall's
+// /UserInstall and /InstallVS paths construct factories internally, bypassing TreatAs.
 extern "C" HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, void** object)
 {
 	if (!object) return E_POINTER;

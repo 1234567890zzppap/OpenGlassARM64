@@ -152,7 +152,7 @@ namespace OpenGlass
 			personalize,
 			wil::reg::key_access::read
 		);
-		diagnostics.windowsTransparencyEnabled = FAILED(personalizeResult) || Util::IsTransparencyEnabled(personalize.get());
+		diagnostics.windowsTransparencyEnabled = SUCCEEDED(personalizeResult) && Util::IsTransparencyEnabled(personalize.get());
 
 		wil::unique_hkey userDwm, machineDwm;
 		if (!userSid.empty())

@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <map>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -76,7 +77,18 @@ namespace OpenGlass::PresetPackages
 		const std::optional<Package>& Origin() const { return m_origin; }
 		void SetOrigin(const Package& package, bool pending)
 		{
-			m_origin = package;
+			// Extraction needs identity and source terms, never another retained
+			// copy of the images or configuration already captured elsewhere.
+			m_origin = Package{
+				.legacyLicense = package.legacyLicense,
+				.attribution = package.attribution,
+				.inheritedLicenses = package.inheritedLicenses,
+				.libraryId = package.libraryId,
+				.sourceType = package.sourceType,
+				.metadata = package.metadata,
+				.licenseText = package.licenseText,
+				.digest = package.digest
+			};
 			if (!pending) Accept();
 		}
 		void Accept() { m_checkpointOrigin = m_origin; }
@@ -95,19 +107,19 @@ namespace OpenGlass::PresetPackages
 		std::string licenseText;
 	};
 
-	[[nodiscard]] Package LoadArchive(const std::filesystem::path& path);
-	[[nodiscard]] Package LoadDeployed(const std::filesystem::path& directory);
+	[[nodiscard]] Package LoadArchive(const std::filesystem::path& path, std::stop_token stop = {});
+	[[nodiscard]] Package LoadDeployed(const std::filesystem::path& directory, std::stop_token stop = {});
 	[[nodiscard]] std::filesystem::path GetPresetRoot();
-	[[nodiscard]] std::vector<Package> EnumerateInstalled(const std::filesystem::path& root = GetPresetRoot(), std::vector<std::wstring>* maintenance = nullptr);
+	[[nodiscard]] std::vector<Package> EnumerateInstalled(const std::filesystem::path& root = GetPresetRoot(), std::vector<std::wstring>* maintenance = nullptr, std::stop_token stop = {});
 	[[nodiscard]] std::string GeneratePackageUuid();
 	[[nodiscard]] bool IsValidHomepageUrl(std::wstring_view value);
 	[[nodiscard]] std::wstring InferLicenseName(std::string_view licenseText);
-	[[nodiscard]] Package CreateSnapshot(CreateRequest request);
+	[[nodiscard]] Package CreateSnapshot(CreateRequest request, std::stop_token stop = {});
 	void ExportArchive(const std::filesystem::path& path, const Package& package);
 	[[nodiscard]] Package Publish(const Package& package, std::string_view sourceType,
 		std::string_view existingId = {}, const std::filesystem::path& root = GetPresetRoot(), std::string_view expectedDigest = {});
-	[[nodiscard]] Package LoadLibraryEntry(const Package& entry, const std::filesystem::path& root = GetPresetRoot());
-	[[nodiscard]] Package LoadTrusted(const Package& entry, const std::filesystem::path& root = GetPresetRoot());
+	[[nodiscard]] Package LoadLibraryEntry(const Package& entry, const std::filesystem::path& root = GetPresetRoot(), std::stop_token stop = {});
+	[[nodiscard]] Package LoadTrusted(const Package& entry, const std::filesystem::path& root = GetPresetRoot(), std::stop_token stop = {});
 	void RemoveLibraryEntry(std::string_view id, const std::filesystem::path& root = GetPresetRoot());
 	void PreserveSource(CreateRequest& request, const Package& source, bool imageAssets);
 	void PreserveRevisionProvenance(CreateRequest& request, const Package* target, const Package* origin);

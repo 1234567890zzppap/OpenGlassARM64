@@ -2,9 +2,12 @@
 #include "MainFrame.hpp"
 #include "ColorPresetList.hpp"
 #include "EffectiveConfiguration.hpp"
+#include "UiControls.hpp"
 #include <wx/imagpng.h>
 #include <wx/dcbuffer.h>
 #include <wx/scrolwin.h>
+#include <wx/timer.h>
+#include <future>
 
 namespace OpenGlass
 {
@@ -211,7 +214,7 @@ namespace OpenGlass
 			{
 				auto* description = new wxTextCtrl(general, wxID_ANY, package.metadata.description, wxDefaultPosition, wxDefaultSize,
 					wxTE_MULTILINE | wxTE_READONLY | wxBORDER_NONE);
-				description->SetBackgroundColour(general->GetBackgroundColour());
+				FollowSystemColours(description, std::nullopt);
 				description->SetMinSize(wxSize(0, description->GetCharHeight() + general->FromDIP(4)));
 				description->Bind(wxEVT_SIZE, [description, general](wxSizeEvent& event)
 				{
@@ -300,7 +303,8 @@ namespace OpenGlass
 			return dialog.ShowModal() == wxID_OK && importing ? PresetPreviewAction::ImportOnly : PresetPreviewAction::Cancel;
 		}
 
-		bool ShowBatchImportPreview(wxWindow* parent, std::span<const PresetPackages::Package> packages, const RegistryConfig& config, const RegistryConfig& user, const RegistryConfig& machine, bool systemTransparency)
+		bool ShowBatchImportPreview(wxWindow* parent, std::span<const PresetPackages::Package> packages, const RegistryConfig& config, const RegistryConfig& user, const RegistryConfig& machine, bool systemTransparency,
+			const std::function<bool(PresetPackages::Package&, const PresetPackages::Package&)>& load)
 		{
 			wxDialog dialog(parent, wxID_ANY, L"Import presets", wxDefaultPosition, wxDefaultSize, wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER);
 			dialog.SetClientSize(dialog.FromDIP(wxSize(740, 440)));
@@ -329,7 +333,8 @@ namespace OpenGlass
 				if (row == wxNOT_FOUND) return;
 				try
 				{
-					const auto package = PresetPackages::LoadArchive(packages[row].source);
+					PresetPackages::Package package;
+					if (!load(package, packages[row])) return;
 					THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_FILE_INVALID), package.digest != packages[row].digest);
 					ShowPresetPreview(&dialog, package, config, false, user, machine, systemTransparency);
 				}
@@ -628,10 +633,89 @@ namespace OpenGlass
 		}
 	}
 
+	bool MainFrame::RunPresetWork(const wxString& message, const std::function<void(std::stop_token)>& work, bool cancellable)
+	{
+		if (m_presetWorkActive || m_configurationOperationActive || m_preview.IsAttemptActive() || IsBeingDeleted()) return false;
+		m_presetWorkActive = true;
+		const auto reset = wil::scope_exit([this] { m_presetWorkActive = false; });
+		m_presetWorkStop = std::stop_source{};
+		const auto token = m_presetWorkStop.get_token();
+		// The worker borrows only this call's input/output data. It cannot outlive
+		// the future, and never reads controls or posts callbacks to a window.
+		auto result = std::async(std::launch::async, [work, token, cancellable]
+		{
+			THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_CANCELLED), cancellable && token.stop_requested());
+			work(cancellable ? token : std::stop_token{});
+		});
+		// Avoid flashing a progress window for empty/small libraries. This is the
+		// only bounded UI wait; longer work runs under a native modal event loop.
+		try
+		{
+			if (result.wait_for(std::chrono::milliseconds(10)) != std::future_status::ready)
+			{
+				wxDialog dialog(this, wxID_ANY, L"OpenGlass presets", wxDefaultPosition, wxDefaultSize, wxDEFAULT_DIALOG_STYLE);
+				auto* layout = new wxBoxSizer(wxVERTICAL);
+				auto* label = new wxStaticText(&dialog, wxID_ANY, message);
+				layout->Add(label, 0, wxEXPAND | wxALL, 16);
+				auto* gauge = new wxGauge(&dialog, wxID_ANY, 100);
+				layout->Add(gauge, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 16);
+				wxWindow* cancel{};
+				if (cancellable)
+				{
+					layout->Add(dialog.CreateButtonSizer(wxCANCEL), 0, wxALIGN_RIGHT | wxALL, 12);
+					cancel = dialog.FindWindow(wxID_CANCEL);
+				}
+				dialog.SetSizerAndFit(layout);
+				dialog.SetMinSize(dialog.FromDIP(wxSize(360, -1)));
+				dialog.CentreOnParent();
+				auto stop = [&]
+				{
+					if (cancellable) m_presetWorkStop.request_stop();
+				};
+				dialog.Bind(wxEVT_BUTTON, [&](wxCommandEvent&) { stop(); }, wxID_CANCEL);
+				dialog.Bind(wxEVT_CLOSE_WINDOW, [&](wxCloseEvent& event) { stop(); if (event.CanVeto()) event.Veto(); });
+				wxTimer timer(&dialog);
+				dialog.Bind(wxEVT_TIMER, [&](wxTimerEvent&)
+				{
+					if (result.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+					{
+						timer.Stop();
+						dialog.EndModal(wxID_OK);
+						return;
+					}
+					if (cancellable && token.stop_requested())
+					{
+						label->SetLabel(L"Cancelling preset validation...");
+						if (cancel) cancel->Disable();
+					}
+					gauge->Pulse();
+				}, timer.GetId());
+				THROW_HR_IF(E_FAIL, !timer.Start(20));
+				dialog.ShowModal();
+			}
+		}
+		catch (...)
+		{
+			m_presetWorkStop.request_stop();
+			if (cancellable) throw;
+			// UI observation failure cannot undo publication already in flight.
+			// Wait for and report its actual outcome even without a progress window.
+			LOG_CAUGHT_EXCEPTION();
+		}
+		try { result.get(); }
+		catch (...)
+		{
+			if (!cancellable || !token.stop_requested()) throw;
+		}
+		// Publication/export keep their existing commit boundary. They must
+		// report the completed outcome, even if a close was requested meanwhile.
+		return !cancellable || !token.stop_requested();
+	}
+
 	void MainFrame::CreatePresetsTab()
 	{
 		auto* panel = new wxPanel(m_notebook);
-		panel->SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW));
+		FollowSystemColours(panel, wxSYS_COLOUR_WINDOW);
 		auto* root = new wxBoxSizer(wxVERTICAL);
 		m_lstPresetPackages = new wxListView(panel, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxLC_REPORT | wxLC_SINGLE_SEL);
 		const wchar_t* headings[]{ L"Name", L"Accent color", L"Author", L"License", L"Status" };
@@ -667,14 +751,15 @@ namespace OpenGlass
 		});
 		DragAcceptFiles(true); EnableElevatedFileDrop(reinterpret_cast<HWND>(GetHandle()));
 		Bind(wxEVT_DROP_FILES, [this](wxDropFilesEvent& event) { ImportDroppedPresetPackages(event); });
-		auto refresh = [this]() { const auto row = m_lstPresetPackages->GetFirstSelected(); RebuildPresetPackageList(row == wxNOT_FOUND ? std::string{} : m_presetPackages[row].libraryId); };
+		// Appearance changes affect thumbnails, not rows, selection or scrolling.
+		auto refresh = [this]() { RebuildPresetPackageImages(); };
 		panel->Bind(wxEVT_DPI_CHANGED, [this, refresh](wxDPIChangedEvent& event) { event.Skip(); CallAfter(refresh); });
 		panel->Bind(wxEVT_SYS_COLOUR_CHANGED, [this, refresh](wxSysColourChangedEvent& event) { event.Skip(); CallAfter(refresh); });
-		RefreshPresetPackages();
 	}
 
 	void MainFrame::ShowPresetContextMenu(wxPoint screenPosition)
 	{
+		if (m_presetWorkActive || m_configurationOperationActive) return;
 		if (screenPosition != wxDefaultPosition)
 		{
 			int flags{};
@@ -718,15 +803,22 @@ namespace OpenGlass
 		}
 	}
 
-	void MainFrame::RefreshPresetPackages()
+	void MainFrame::RefreshPresetPackages(std::string_view selectedId)
 	{
-		if (!m_lstPresetPackages) return;
+		if (!m_lstPresetPackages || m_presetWorkActive || m_configurationOperationActive) return;
 		const auto selected = m_lstPresetPackages->GetFirstSelected();
-		const auto id = selected == wxNOT_FOUND ? std::string{} : m_presetPackages[selected].libraryId;
+		const auto id = !selectedId.empty() ? std::string(selectedId)
+			: selected == wxNOT_FOUND ? std::string{} : m_presetPackages[selected].libraryId;
 		try
 		{
 			std::vector<std::wstring> maintenance;
-			m_presetPackages = PresetPackages::EnumerateInstalled(PresetPackages::GetPresetRoot(), &maintenance);
+			std::vector<PresetPackages::Package> packages;
+			const auto root = PresetPackages::GetPresetRoot();
+			if (!RunPresetWork(L"Reading the preset library...", [&](std::stop_token stop)
+			{
+				packages = PresetPackages::EnumerateInstalled(root, &maintenance, stop);
+			})) return;
+			m_presetPackages = std::move(packages);
 			if (!maintenance.empty())
 			{
 				std::wstring message; for (const auto& item : maintenance) message += item + L"\n";
@@ -765,12 +857,7 @@ namespace OpenGlass
 			return result == CSTR_EQUAL ? a.libraryId < b.libraryId : m_presetSortAscending ? result == CSTR_LESS_THAN : result == CSTR_GREATER_THAN;
 		});
 		m_lstPresetPackages->DeleteAllItems();
-		// A 24-DIP image slot gives report rows breathing room around 16-DIP swatches.
-		const PackagePreviewMetrics metrics{ 24, 4 };
-		const auto size = m_lstPresetPackages->FromDIP(metrics.canvasDip);
-		auto images = std::make_unique<wxImageList>(size, size, true);
-		for (const auto& package : m_presetPackages) images->Add(CreatePackagePreviewBitmap(m_lstPresetPackages, package, metrics));
-		m_lstPresetPackages->AssignImageList(images.release(), wxIMAGE_LIST_SMALL);
+		RebuildPresetPackageImages();
 		for (std::size_t index = 0; index < m_presetPackages.size(); ++index)
 		{
 			const auto& package = m_presetPackages[index];
@@ -783,6 +870,17 @@ namespace OpenGlass
 		m_lstPresetPackages->GetParent()->Layout();
 	}
 
+	void MainFrame::RebuildPresetPackageImages()
+	{
+		// A 24-DIP image slot gives report rows breathing room around 16-DIP swatches.
+		const PackagePreviewMetrics metrics{ 24, 4 };
+		const auto size = m_lstPresetPackages->FromDIP(metrics.canvasDip);
+		auto images = std::make_unique<wxImageList>(size, size, true);
+		for (const auto& package : m_presetPackages) images->Add(CreatePackagePreviewBitmap(m_lstPresetPackages, package, metrics));
+		m_lstPresetPackages->AssignImageList(images.release(), wxIMAGE_LIST_SMALL);
+		m_lstPresetPackages->Refresh(false);
+	}
+
 	void MainFrame::SelectPresetPackageRow(std::size_t row)
 	{
 		if (!m_lstPresetPackages || row >= m_presetPackages.size()) return;
@@ -792,22 +890,26 @@ namespace OpenGlass
 
 	void MainFrame::UpdatePresetPackageDetails()
 	{
+		if (m_presetWorkActive || m_configurationOperationActive) return;
 		const auto row = m_lstPresetPackages->GetFirstSelected();
 		if (row == wxNOT_FOUND) return;
 		try
 		{
-			const auto& selected = m_presetPackages[row];
+			const auto selected = m_presetPackages[row];
 			if (!selected.loadError.empty()) { wxMessageBox(selected.loadError, L"Preset properties", wxOK | wxICON_ERROR, this); return; }
-			auto package = PresetPackages::LoadLibraryEntry(selected);
-			THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_RETRY), package.digest != selected.digest);
-
-			if (!package.loadError.empty()) { wxMessageBox(package.loadError, L"Preset properties", wxOK | wxICON_ERROR, this); return; }
+			PresetPackages::Package package;
+			if (!RunPresetWork(L"Validating the preset...", [&](std::stop_token stop)
+			{
+				package = PresetPackages::LoadLibraryEntry(selected, PresetPackages::GetPresetRoot(), stop);
+			})) return;
 			const auto action = ShowPresetPreview(this, package, *m_config, !package.trusted, *m_userConfig, *m_systemConfig, m_systemTransparency);
 			if (!package.trusted && action == PresetPreviewAction::ImportOnly)
 			{
-				const auto verified = PresetPackages::LoadLibraryEntry(package);
-				THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_RETRY), verified.digest != package.digest);
-				(void)PresetPackages::Publish(verified, "imported", package.libraryId, PresetPackages::GetPresetRoot(), package.digest);
+				if (!RunPresetWork(L"Saving the accepted preset...", [&](std::stop_token)
+				{
+					const auto verified = PresetPackages::LoadLibraryEntry(package);
+					(void)PresetPackages::Publish(verified, "imported", package.libraryId, PresetPackages::GetPresetRoot(), package.digest);
+				}, false)) return;
 				RefreshPresetPackages();
 			}
 		}
@@ -816,6 +918,7 @@ namespace OpenGlass
 
 	void MainFrame::ImportPresetPackage()
 	{
+		if (m_presetWorkActive || m_configurationOperationActive) return;
 		wxFileDialog dialog(this, L"Import OpenGlass preset ZIP", wxEmptyString, wxEmptyString, L"ZIP archives (*.zip)|*.zip", wxFD_OPEN | wxFD_FILE_MUST_EXIST);
 		if (dialog.ShowModal() != wxID_OK) return;
 		ImportPresetPackage(dialog.GetPath().ToStdWstring());
@@ -823,6 +926,7 @@ namespace OpenGlass
 
 	void MainFrame::ImportDroppedPresetPackages(const wxDropFilesEvent& event)
 	{
+		if (m_presetWorkActive || m_configurationOperationActive) return;
 		if (event.GetNumberOfFiles() == 0) return;
 		if (static_cast<std::size_t>(event.GetNumberOfFiles()) > MaximumBatchPackageCount)
 		{
@@ -854,28 +958,42 @@ namespace OpenGlass
 
 	void MainFrame::ImportPresetPackages(std::span<const std::filesystem::path> paths)
 	{
+		if (m_presetWorkActive || m_configurationOperationActive) return;
 		std::size_t imported{};
 		try
 		{
 			std::vector<PresetPackages::Package> packages;
-			for (const auto& path : paths)
+			if (!RunPresetWork(L"Validating the preset ZIPs...", [&](std::stop_token stop)
 			{
-				auto package = PresetPackages::LoadArchive(path);
-				package.assets.clear(); // Load one package's images on demand during review.
-				packages.push_back(std::move(package));
-			}
-			if (!ShowBatchImportPreview(this, packages, *m_config, *m_userConfig, *m_systemConfig, m_systemTransparency)) return;
-			for (const auto& package : packages)
+				for (const auto& path : paths)
+				{
+					auto package = PresetPackages::LoadArchive(path, stop);
+					package.assets.clear(); // Load one package's images on demand during review.
+					packages.push_back(std::move(package));
+				}
+			})) return;
+			if (!ShowBatchImportPreview(this, packages, *m_config, *m_userConfig, *m_systemConfig, m_systemTransparency,
+				[&](auto& package, const auto& selected)
+				{
+					return RunPresetWork(L"Validating the preset...", [&](std::stop_token stop)
+					{
+						package = PresetPackages::LoadArchive(selected.source, stop);
+					});
+				})) return;
+			if (!RunPresetWork(L"Importing the accepted presets...", [&](std::stop_token)
 			{
-				auto verified = PresetPackages::LoadArchive(package.source);
-				THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_FILE_INVALID), verified.digest != package.digest);
-				(void)PresetPackages::Publish(verified, "imported");
-				++imported;
-			}
+				for (const auto& package : packages)
+				{
+					auto verified = PresetPackages::LoadArchive(package.source);
+					THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_FILE_INVALID), verified.digest != package.digest);
+					(void)PresetPackages::Publish(verified, "imported");
+					++imported;
+				}
+			}, false)) return;
 		}
 		catch (...)
 		{
-			wxMessageBox(wxString::Format(L"Import stopped (0x%08lX). %zu completed imports remain in the library. The configuration was not changed.",
+			wxMessageBox(wxString::Format(L"Import stopped (0x%08lX). %zu imports were confirmed. Check the refreshed library for any additional saved entry. The configuration was not changed.",
 				wil::ResultFromCaughtException(), imported), L"Preset import", wxOK | wxICON_ERROR, this);
 		}
 		RefreshPresetPackages();
@@ -883,27 +1001,40 @@ namespace OpenGlass
 
 	void MainFrame::ImportPresetPackage(const std::filesystem::path& path)
 	{
+		if (m_presetWorkActive || m_configurationOperationActive) return;
+		bool publicationStarted{};
 		try
 		{
-			const auto reviewed = PresetPackages::LoadArchive(path);
+			PresetPackages::Package reviewed;
+			if (!RunPresetWork(L"Validating the preset ZIP...", [&](std::stop_token stop)
+			{
+				reviewed = PresetPackages::LoadArchive(path, stop);
+			})) return;
 			const auto action = ShowPresetPreview(this, reviewed, *m_config, true, *m_userConfig, *m_systemConfig, m_systemTransparency);
 			if (action == PresetPreviewAction::Cancel) return;
-			const auto verified = PresetPackages::LoadArchive(path);
-			THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_FILE_INVALID), verified.digest != reviewed.digest);
-			const auto saved = PresetPackages::Publish(verified, "imported");
+			PresetPackages::Package saved;
+			if (!RunPresetWork(L"Importing the accepted preset...", [&](std::stop_token)
+			{
+				const auto verified = PresetPackages::LoadArchive(path);
+				THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_FILE_INVALID), verified.digest != reviewed.digest);
+				publicationStarted = true;
+				saved = PresetPackages::Publish(verified, "imported");
+			}, false)) return;
 
-			RefreshPresetPackages();
-			RebuildPresetPackageList(saved.libraryId);
+			RefreshPresetPackages(saved.libraryId);
 		}
 		catch (...)
 		{
-			wxMessageBox(wxString::Format(L"The preset could not be imported (0x%08lX).", wil::ResultFromCaughtException()),
-				L"Preset import", wxOK | wxICON_ERROR, this);
+			auto message = wxString::Format(L"The import operation did not finish (0x%08lX).", wil::ResultFromCaughtException());
+			if (publicationStarted) message += L" The entry may already have been saved. Check the refreshed library.";
+			wxMessageBox(message, L"Preset import", wxOK | wxICON_ERROR, this);
+			if (publicationStarted) RefreshPresetPackages();
 		}
 	}
 
 	void MainFrame::ApplySelectedPresetPackage()
 	{
+		if (m_presetWorkActive || m_configurationOperationActive) return;
 		const long selection = m_lstPresetPackages->GetFirstSelected();
 		if (selection == wxNOT_FOUND || static_cast<std::size_t>(selection) >= m_presetPackages.size()) return;
 		const auto selected = m_presetPackages[selection];
@@ -917,9 +1048,14 @@ namespace OpenGlass
 
 	void MainFrame::ApplyPresetPackage(const PresetPackages::Package& inputPackage)
 	{
+		if (m_presetWorkActive || m_configurationOperationActive) return;
 		try
 		{
-			auto package = PresetPackages::LoadTrusted(inputPackage);
+			PresetPackages::Package package;
+			if (!RunPresetWork(L"Validating the preset before applying...", [&](std::stop_token stop)
+			{
+				package = PresetPackages::LoadTrusted(inputPackage, PresetPackages::GetPresetRoot(), stop);
+			})) return;
 			const auto prepared = m_resources.Prepare(package, m_editScope);
 			const auto model = PackageModel(package, m_resources, m_editScope);
 			const auto plan = EffectiveConfiguration::Plan(EffectiveConfiguration::Read(*m_userConfig, m_systemTransparency), EffectiveConfiguration::Read(*m_systemConfig), model, m_editScope, package.catalogVersion, m_systemTransparency);
@@ -947,7 +1083,6 @@ namespace OpenGlass
 			{
 				LoadSettings();
 				m_presetProvenance.SetOrigin(inputPackage, m_isDirty);
-				RebuildPresetPackageList(package.libraryId);
 			}
 			if (applied && restartRequired) wxMessageBox(L"Some settings take effect after restarting DWM or signing out. DWM has not been restarted.", L"Preset applied", wxOK | wxICON_INFORMATION, this);
 		}
@@ -992,6 +1127,7 @@ namespace OpenGlass
 
 	void MainFrame::CreatePresetPackage(bool update)
 	{
+		if (m_presetWorkActive || m_configurationOperationActive) return;
 		if (m_isDirty)
 		{
 			wxMessageBox(L"Save or Revert pending changes before creating or updating a preset.", L"New preset", wxOK | wxICON_INFORMATION, this);
@@ -1036,32 +1172,50 @@ namespace OpenGlass
 		m_lastPresetIncludeLicense = dialog.IncludeLicense();
 		m_lastPresetLicenseText = dialog.LicenseEditorText();
 
+		bool publicationStarted{};
 		try
 		{
 			CaptureEffectivePreset(request, dialog.IncludeAccentColor(), source ? &*source : nullptr);
-			auto snapshot = PresetPackages::CreateSnapshot(std::move(request));
-			const auto saved = PresetPackages::Publish(snapshot, "local", update ? source->libraryId : "", PresetPackages::GetPresetRoot(), update ? source->digest : "");
+			PresetPackages::Package snapshot, saved;
+			if (!RunPresetWork(L"Validating the captured preset...", [&](std::stop_token stop)
+			{
+				snapshot = PresetPackages::CreateSnapshot(std::move(request), stop);
+			})) return;
+			if (!RunPresetWork(L"Saving the preset...", [&](std::stop_token)
+			{
+				publicationStarted = true;
+				saved = PresetPackages::Publish(snapshot, "local", update ? source->libraryId : "", PresetPackages::GetPresetRoot(), update ? source->digest : "");
+			}, false)) return;
 			m_presetProvenance.SetOrigin(saved, false);
-			RefreshPresetPackages();
-			RebuildPresetPackageList(saved.libraryId);
+			RefreshPresetPackages(saved.libraryId);
 		}
 		catch (...)
 		{
-			wxMessageBox(wxString::Format(L"The preset could not be saved (0x%08lX). The saved entry has not been replaced.", wil::ResultFromCaughtException()),
-				L"New preset", wxOK | wxICON_ERROR, this);
+			auto message = wxString::Format(L"The save operation did not finish (0x%08lX).", wil::ResultFromCaughtException());
+			if (publicationStarted) message += L" The entry may already have been saved. Check the refreshed library.";
+			wxMessageBox(message, L"New preset", wxOK | wxICON_ERROR, this);
+			if (publicationStarted) RefreshPresetPackages(update ? source->libraryId : "");
 		}
 	}
 
 	void MainFrame::ExportSelectedPresetPackage()
 	{
+		if (m_presetWorkActive || m_configurationOperationActive) return;
 		const auto selection = m_lstPresetPackages->GetFirstSelected();
 		if (selection == wxNOT_FOUND || static_cast<std::size_t>(selection) >= m_presetPackages.size()) return;
-		const auto& package = m_presetPackages.at(selection);
+		const auto package = m_presetPackages.at(selection);
 		wxFileDialog save(this, L"Export saved preset", wxEmptyString,
 			SanitizePackageFileName(package.metadata.name) + L"-" + wxString::FromUTF8(package.metadata.uuid) + L".zip",
 			L"ZIP archives (*.zip)|*.zip", wxFD_SAVE);
 		if (save.ShowModal() != wxID_OK) return;
-		try { PresetPackages::ExportArchive(save.GetPath().ToStdWstring(), PresetPackages::LoadTrusted(package)); }
+		const std::filesystem::path path(save.GetPath().ToStdWstring());
+		try
+		{
+			(void)RunPresetWork(L"Exporting the saved preset...", [&](std::stop_token)
+			{
+				PresetPackages::ExportArchive(path, package);
+			}, false);
+		}
 		catch (...)
 		{
 			wxMessageBox(wxString::Format(L"Export failed (0x%08lX). Choose a new file name if the destination already exists.", wil::ResultFromCaughtException()),
@@ -1071,13 +1225,14 @@ namespace OpenGlass
 
 	void MainFrame::RemoveSelectedPresetPackage()
 	{
+		if (m_presetWorkActive || m_configurationOperationActive) return;
 		const long selection = m_lstPresetPackages->GetFirstSelected();
 		if (selection == wxNOT_FOUND || static_cast<std::size_t>(selection) >= m_presetPackages.size()) return;
 		try
 		{
-			const auto& package = m_presetPackages[selection];
+			const auto libraryId = m_presetPackages[selection].libraryId;
 			if (wxMessageBox(L"Delete this preset and its library files? Current configuration and Revert keep their independent resources.", L"Delete preset", wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION, this) != wxYES) return;
-			PresetPackages::RemoveLibraryEntry(package.libraryId);
+			PresetPackages::RemoveLibraryEntry(libraryId);
 			RefreshPresetPackages();
 		}
 		catch (...)

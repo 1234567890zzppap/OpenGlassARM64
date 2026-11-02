@@ -1,0 +1,94 @@
+{
+  "layouts": [
+    {
+      "name": "CDrawingContext_DeviceTarget",
+      "id": "CDrawingContext.DeviceTarget",
+      "kind": "field",
+      "type": "IDeviceTarget*",
+      "cases": [
+        {
+          "platform": null,
+          "ranges": [
+            {
+              "offset": 24,
+              "otherwise": true
+            }
+          ]
+        }
+      ],
+      "notes": "MILComp CDrawingContext rendering paths obtain the device target from this field."
+    },
+    {
+      "name": "CDrawingContext_GetD2DContextOwner",
+      "id": "CDrawingContext_GetD2DContextOwner",
+      "kind": "field",
+      "type": "ID2DContextOwner",
+      "cases": [
+        {
+          "platform": null,
+          "ranges": [
+            {
+              "offset": 16,
+              "otherwise": true
+            }
+          ]
+        }
+      ],
+      "notes": "CDrawingContext::Create assigns the ID2DContextOwner vtable at this + 16; cross-check the subobject receiver passed by FlushD2D."
+    },
+    {
+      "name": "CDrawingContext_GetD3DDevice",
+      "id": "CDrawingContext_GetD3DDevice",
+      "kind": "field",
+      "type": "CD3DDevice*",
+      "cases": [
+        {
+          "platform": null,
+          "ranges": [
+            {
+              "offset": 32,
+              "otherwise": true
+            }
+          ]
+        }
+      ],
+      "notes": "CDrawingContext::FlushD2D\n*((QWORD *)this + 4) → CD3DDevice* (non-virtual, raw this)"
+    },
+    {
+      "name": "CDrawingContext_GetDeviceTransform",
+      "id": "CDrawingContext_GetDeviceTransform",
+      "kind": "field",
+      "type": "CMILMatrix",
+      "cases": [
+        {
+          "platform": null,
+          "ranges": [
+            {
+              "offset": 88,
+              "otherwise": true
+            }
+          ]
+        }
+      ],
+      "notes": "CDrawingContext::UpdateDeviceTransform passes the embedded device transform matrix to CMILMatrix::Multiply."
+    },
+    {
+      "name": "CDrawingContext_GetWorldTransform",
+      "id": "CDrawingContext_GetWorldTransform",
+      "kind": "field",
+      "type": "CMatrixStack",
+      "cases": [
+        {
+          "platform": null,
+          "ranges": [
+            {
+              "offset": 280,
+              "otherwise": true
+            }
+          ]
+        }
+      ],
+      "notes": "CDrawingContext::GetWorldTransform3x2 is slot 0 of ID2DContextOwner. Its this pointer is adjusted by 16 bytes; recover the complete-object offset from that subobject displacement and the matrix-stack data/count loads."
+    }
+  ]
+}

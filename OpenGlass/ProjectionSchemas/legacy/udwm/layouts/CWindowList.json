@@ -1,0 +1,40 @@
+{
+  "layouts": [
+    {
+      "name": "CWindowList_DesktopWindowListMap",
+      "id": "CWindowList.DesktopWindowListMap",
+      "kind": "field",
+      "type": "DesktopWindowListMap",
+      "cases": [
+        {
+          "platform": "arm64",
+          "ranges": [
+            {
+              "offset": 8,
+              "otherwise": true
+            }
+          ]
+        }
+      ],
+      "notes": "Verified on 22631 ARM64: CWindowList::StyleChange passes this address to the desktop-map lookup that replaces the inlined GetWindowListForDesktop."
+    },
+    {
+      "name": "CWindowList_DESKTOP_WINDOWLIST_MAP_ENTRY_RList",
+      "id": "CWindowList.DESKTOP_WINDOWLIST_MAP_ENTRY.RList",
+      "kind": "field",
+      "type": "_LIST_ENTRY",
+      "cases": [
+        {
+          "platform": "arm64",
+          "ranges": [
+            {
+              "offset": 80,
+              "otherwise": true
+            }
+          ]
+        }
+      ],
+      "notes": "Verified on 22631 ARM64: ten pointer-sized members ahead of the list head, matching the entry the x64 GetWindowListForDesktop returns."
+    }
+  ]
+}

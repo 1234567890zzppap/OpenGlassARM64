@@ -1,10 +1,10 @@
 #include "pch.h"
-#include "StartupTrace.hpp"
 #include "MsstyleInternals.hpp"
 #include "Shared.hpp"
 #include "HookHelper.hpp"
 #include "uDwmProjection.hpp"
 #include "CustomThemeAtlasLoader.hpp"
+#include "GlassEngine.hpp"
 #include "PngAssetValidation.hpp"
 #include "ThemeAtlasLayout.hpp"
 
@@ -75,11 +75,11 @@ HRESULT CustomThemeAtlasLoader::MyGetThemeStream(
 )
 {
 	if (
-		hTheme != g_themeHandle.get() ||
 		iPartId ||
 		iStateId ||
 		iPropId != TMT_DISKSTREAM ||
-		!g_themeAtlasStreamSize
+		!g_themeAtlasStreamSize ||
+		!IsDwmWindowTheme(hTheme)
 	)
 	{
 		return g_GetThemeStream_Org(hTheme, iPartId, iStateId, iPropId, ppvStream, pcbStream, hInst);
@@ -102,7 +102,6 @@ HRESULT CustomThemeAtlasLoader::MyGetThemeMargins(
 {
 	decltype(g_themeAtlasLayoutMap)::iterator it;
 	if (
-		hTheme != g_themeHandle.get() ||
 		(
 			it = g_themeAtlasLayoutMap.find(
 				make_theme_atlas_layout_key(
@@ -111,7 +110,8 @@ HRESULT CustomThemeAtlasLoader::MyGetThemeMargins(
 					iPropId
 				)
 			)
-		) == g_themeAtlasLayoutMap.end()
+		) == g_themeAtlasLayoutMap.end() ||
+		!IsDwmWindowTheme(hTheme)
 	)
 	{
 		return g_GetThemeMargins_Org(hTheme, hdc, iPartId, iStateId, iPropId, prc, pMargins);
@@ -131,7 +131,6 @@ HRESULT CustomThemeAtlasLoader::MyGetThemeRect(
 {
 	decltype(g_themeAtlasLayoutMap)::iterator it;
 	if (
-		hTheme != g_themeHandle.get() ||
 		(
 			it = g_themeAtlasLayoutMap.find(
 				make_theme_atlas_layout_key(
@@ -140,7 +139,8 @@ HRESULT CustomThemeAtlasLoader::MyGetThemeRect(
 					iPropId
 				)
 			)
-		) == g_themeAtlasLayoutMap.end()
+		) == g_themeAtlasLayoutMap.end() ||
+		!IsDwmWindowTheme(hTheme)
 	)
 	{
 		return g_GetThemeRect_Org(hTheme, iPartId, iStateId, iPropId, pRect);
@@ -166,7 +166,6 @@ HRESULT CustomThemeAtlasLoader::MyGetThemeInt(
 {
 	decltype(g_themeAtlasLayoutMap)::iterator it;
 	if (
-		hTheme != g_themeHandle.get() ||
 		(
 			it = g_themeAtlasLayoutMap.find(
 				make_theme_atlas_layout_key(
@@ -175,7 +174,8 @@ HRESULT CustomThemeAtlasLoader::MyGetThemeInt(
 					iPropId
 				)
 			)
-		) == g_themeAtlasLayoutMap.end()
+		) == g_themeAtlasLayoutMap.end() ||
+		!IsDwmWindowTheme(hTheme)
 	)
 	{
 		return g_GetThemeInt_Org(hTheme, iPartId, iStateId, iPropId, piVal);
@@ -195,7 +195,6 @@ HRESULT CustomThemeAtlasLoader::MyGetThemeColor(
 {
 	decltype(g_themeAtlasLayoutMap)::iterator it;
 	if (
-		hTheme != g_themeHandle.get() ||
 		(
 			it = g_themeAtlasLayoutMap.find(
 				make_theme_atlas_layout_key(
@@ -204,7 +203,8 @@ HRESULT CustomThemeAtlasLoader::MyGetThemeColor(
 					iPropId
 				)
 			)
-		) == g_themeAtlasLayoutMap.end()
+		) == g_themeAtlasLayoutMap.end() ||
+		!IsDwmWindowTheme(hTheme)
 	)
 	{
 		return g_GetThemeColor_Org(hTheme, iPartId, iStateId, iPropId, pColor);
@@ -717,18 +717,6 @@ void CustomThemeAtlasLoader::Update(GlassEngine::UpdateType type)
 		Shared::g_colorizationBaseTransparent = Color::FromArgb(transparent, false);
 		Shared::g_colorizationBaseMaximized = Color::FromArgb(maximized, false);
 		Shared::g_colorizationBaseOpaque = Color::FromArgb(opaque, false);
-		StartupTrace::Write(
-			"colors: type=%u themeHandle=%p base transparent=%#08x maximized=%#08x opaque=%#08x opacity=%.2f/%.2f/%.2f/%.2f",
-			static_cast<unsigned>(Shared::g_type),
-			static_cast<void*>(themeHandle),
-			transparent,
-			maximized,
-			static_cast<unsigned>(opaque),
-			Shared::g_colorizationOpacity,
-			Shared::g_colorizationOpacityInactive,
-			Shared::g_colorizationOpacityMaximized,
-			Shared::g_colorizationOpacityInactiveMaximized
-		);
 	}
 }
 

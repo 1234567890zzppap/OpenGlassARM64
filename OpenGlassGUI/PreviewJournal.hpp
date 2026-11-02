@@ -13,7 +13,9 @@ namespace OpenGlass
 		std::map<Key, Value> m_baseline;
 		std::map<Key, Value> m_attempt;
 		std::set<Key> m_pending;
-		std::optional<std::map<Key, Value>> m_previousBaseline;
+		// Undo only baseline entries changed by this attempt. Copying the complete
+		// baseline on Begin also copied retained images on unrelated slider edits.
+		std::optional<std::map<Key, std::optional<Value>>> m_previousBaseline;
 	public:
 		bool IsDirty() const noexcept { return !m_baseline.empty(); }
 		bool IsAttemptActive() const noexcept { return m_previousBaseline.has_value(); }
@@ -22,7 +24,7 @@ namespace OpenGlass
 		void Begin()
 		{
 			if (IsAttemptActive()) throw std::logic_error("Nested preview attempt");
-			m_previousBaseline = m_baseline;
+			m_previousBaseline.emplace();
 			m_attempt.clear();
 		}
 		template<class Reader> void Touch(const Key& key, Reader&& read)
@@ -31,6 +33,7 @@ namespace OpenGlass
 			if (m_baseline.contains(key) && (!IsAttemptActive() || m_attempt.contains(key))) return;
 			auto value = read(key);
 			if (IsAttemptActive()) m_attempt.try_emplace(key, value);
+			if (IsAttemptActive() && !m_baseline.contains(key)) m_previousBaseline->try_emplace(key, std::nullopt);
 			m_baseline.try_emplace(key, std::move(value));
 		}
 		// Only read keys written by this operation. External changes to other keys
@@ -43,14 +46,21 @@ namespace OpenGlass
 				if (const auto attempt = m_attempt.find(key); attempt != m_attempt.end() && attempt->second == value) m_attempt.erase(attempt);
 				if (const auto found = m_baseline.find(key); found != m_baseline.end() && found->second == value)
 				{
-					m_baseline.erase(found);
+					DiscardBaseline(key);
 				}
 			}
 			m_pending.clear();
 		}
 		// Drop a session baseline when a semantic restore now owns this derived value.
 		// Keep the attempt snapshot so a later failure can still undo this operation.
-		void DiscardBaseline(const Key& key) { m_baseline.erase(key); }
+		void DiscardBaseline(const Key& key)
+		{
+			const auto found = m_baseline.find(key);
+			if (found == m_baseline.end()) return;
+			if (IsAttemptActive() && !m_previousBaseline->contains(key))
+				m_previousBaseline->emplace(key, std::move(found->second));
+			m_baseline.erase(found);
+		}
 		template<class Visitor> void VisitRestore(bool attempt, Visitor&& visit) const
 		{
 			for (const auto& [key, value] : attempt ? m_attempt : m_baseline) visit(key, value);
@@ -60,10 +70,16 @@ namespace OpenGlass
 		{
 			bool success = externalRestored;
 			for (const auto& [key, value] : m_attempt) if (!write(key, value)) success = false;
-			if (success && m_previousBaseline) m_baseline = std::move(*m_previousBaseline);
-			else if (!success)
+			if (m_previousBaseline)
 			{
-				if (m_previousBaseline) for (const auto& [key, value] : *m_previousBaseline) m_baseline.insert_or_assign(key, value);
+				for (auto& [key, value] : *m_previousBaseline)
+				{
+					if (value) m_baseline.insert_or_assign(key, std::move(*value));
+					else if (success) m_baseline.erase(key);
+				}
+			}
+			if (!success)
+			{
 				for (const auto& [key, value] : m_attempt) m_baseline.try_emplace(key, value);
 			}
 			CommitAttempt();

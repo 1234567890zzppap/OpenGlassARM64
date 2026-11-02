@@ -11,6 +11,7 @@ namespace OpenGlass::DirectUI
 	struct InputEvent;
 	struct Event;
 
+	// Callback slots verified against x64 10.0.26100.9549; IXProviderCP is not IUnknown.
 	struct IElementListener
 	{
 		virtual void OnListenerAttach(Element*) = 0;

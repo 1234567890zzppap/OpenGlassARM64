@@ -7,7 +7,6 @@
 #include <winrt/Windows.Storage.Streams.h>
 #include <winrt/Windows.Web.Http.h>
 #include <winrt/Windows.Web.Http.Headers.h>
-#include <winrt/Windows.Web.Http.Filters.h>
 #include <wil/cppwinrt.h>
 
 #include <chrono>
@@ -21,156 +20,140 @@ namespace OpenGlass
 {
 	namespace
 	{
-
-		struct RawDownloadProgress
+		auto WaitForDownload(const auto& operation, const std::stop_token& stopToken)
 		{
-			double percent{ -1.0 };
-			uint64_t totalBytes{ 0 };
-			uint64_t downloadedBytes{ 0 };
-			uint32_t lastChunkBytes{ 0 };
-		};
+			// A read racing Cancel can reach Canceled without delivering Completed.
+			// Cancellation must wake the worker independently of that notification.
+			const wil::shared_event finished{ wil::EventOptions::ManualReset };
+			const std::stop_callback cancel{ stopToken, [&operation, &finished]
+			{
+				try
+				{
+					operation.Cancel();
+				}
+				catch (...)
+				{
+					LOG_CAUGHT_EXCEPTION();
+				}
+				finished.SetEvent();
+			} };
+			// The provider may retain its callback after cancellation or timeout.
+			operation.Completed([finished](const auto&, auto) { finished.SetEvent(); });
+			const bool signaled = finished.wait(SymbolDownloadTimeoutSeconds * 1000);
+			THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_CANCELLED), stopToken.stop_requested());
+			if (!signaled)
+			{
+				operation.Cancel();
+				THROW_HR(HRESULT_FROM_WIN32(ERROR_TIMEOUT));
+			}
+			if (operation.Status() == winrt::Windows::Foundation::AsyncStatus::Canceled)
+			{
+				throw winrt::hresult_canceled{};
+			}
+			return operation.GetResults();
+		}
 
-		struct ModuleDownloadInfo
+		void DownloadSymbolFile(
+			const winrt::Windows::Web::Http::HttpClient& client,
+			const std::stop_token& stopToken,
+			const winrt::hstring& url,
+			const std::filesystem::path& destination,
+			int basePercent,
+			const SymbolDownloadProgressCallback& progressCallback
+		)
 		{
-			std::wstring moduleName;
-			std::wstring modulePath;
-			std::wstring pdbFileName;
-			std::wstring url;
-		};
+			THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_CANCELLED), stopToken.stop_requested());
 
-		class CSymbolDownloader
-		{
-			winrt::Windows::Web::Http::HttpClient m_client{};
+			const winrt::Windows::Foundation::Uri uri{ url };
+			const winrt::Windows::Web::Http::HttpRequestMessage request{ winrt::Windows::Web::Http::HttpMethod::Get(), uri };
+			const auto response = WaitForDownload(client.SendRequestAsync(
+				request, winrt::Windows::Web::Http::HttpCompletionOption::ResponseHeadersRead
+			), stopToken);
+			response.EnsureSuccessStatusCode();
+			const auto content = response.Content();
+			const auto length = content.Headers().ContentLength();
+			const uint64_t totalBytes = length ? length.Value() : 0;
 
-		public:
-			using Callback = std::function<void(const RawDownloadProgress&)>;
+			// A cancelled or failed refresh must leave the existing symbol cache usable.
+			// Keep the staging file beside its destination so publication stays on one volume.
+			GUID stagingId{};
+			THROW_IF_FAILED(CoCreateGuid(&stagingId));
+			WCHAR stagingName[39]{};
+			StringFromGUID2(stagingId, stagingName, ARRAYSIZE(stagingName));
+			auto targetPath = std::filesystem::absolute(destination).wstring();
+			if (!targetPath.starts_with(L"\\\\?\\"))
+			{
+				// A longer staging name must not shorten the supported cache directory path.
+				targetPath = targetPath.starts_with(L"\\\\")
+					? L"\\\\?\\UNC\\" + targetPath.substr(2) : L"\\\\?\\" + targetPath;
+			}
+			const auto stagingPath = std::filesystem::path{ targetPath }.parent_path() / stagingName;
+			wil::unique_hfile file{ CreateFileW(
+				stagingPath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr
+			) };
+			THROW_LAST_ERROR_IF(!file);
 
-			CSymbolDownloader() = default;
+			bool completed = false;
+			const auto cleanup = wil::scope_exit([&]
+			{
+				file.reset();
+				if (!completed)
+				{
+					std::error_code cleanupError;
+					std::filesystem::remove(stagingPath, cleanupError);
+				}
+			});
 
-			HRESULT Download(
-				const std::stop_token& stopToken,
-				const winrt::hstring& url,
-				const winrt::hstring& destinationPath,
-				const Callback& progressCallback
-			) try
+			const auto stream = WaitForDownload(content.ReadAsInputStreamAsync(), stopToken);
+			winrt::Windows::Storage::Streams::Buffer buffer{ 128 * 1024 };
+			const auto fileName = destination.filename().wstring();
+			auto nextProgress = std::chrono::steady_clock::time_point::min();
+
+			uint64_t downloaded = 0;
+			for (;;)
 			{
 				THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_CANCELLED), stopToken.stop_requested());
 
-				if (progressCallback)
+				const auto read = WaitForDownload(stream.ReadAsync(
+					buffer, buffer.Capacity(), winrt::Windows::Storage::Streams::InputStreamOptions::Partial
+				), stopToken);
+				if (read.Length() == 0)
 				{
-					progressCallback(RawDownloadProgress{});
+					break;
 				}
 
-				const winrt::Windows::Foundation::Uri uri{ url };
-				const winrt::Windows::Web::Http::HttpRequestMessage request{ winrt::Windows::Web::Http::HttpMethod::Get(), uri };
-				auto responseOperation = m_client.SendRequestAsync(
-					request,
-					winrt::Windows::Web::Http::HttpCompletionOption::ResponseHeadersRead
-				);
-				if (responseOperation.wait_for(std::chrono::seconds{ SymbolDownloadTimeoutSeconds }) == winrt::Windows::Foundation::AsyncStatus::Started)
+				DWORD written = 0;
+				THROW_IF_WIN32_BOOL_FALSE(WriteFile(file.get(), read.data(), read.Length(), &written, nullptr));
+				downloaded += written;
+
+				// Each callback queues a UI update and rewraps status text. Network chunk
+				// boundaries are not useful UI events; keep formatting and delivery at 10 Hz.
+				const auto now = std::chrono::steady_clock::now();
+				if (progressCallback && now >= nextProgress)
 				{
-					responseOperation.Cancel();
-					THROW_HR(HRESULT_FROM_WIN32(ERROR_TIMEOUT));
+					const auto percent = totalBytes
+						? std::clamp(static_cast<int>(100.0 * downloaded / totalBytes), 0, 100) : 0;
+					std::wstring detail = std::format(L"{} - {} bytes", fileName, downloaded);
+					if (totalBytes)
+					{
+						detail += std::format(L" / {} bytes ({}%)", totalBytes, percent);
+					}
+					progressCallback(SymbolDownloadProgress{
+						basePercent + percent / 2, totalBytes == 0,
+						totalBytes ? std::format(L"Downloading {}", fileName) : L"Connecting to Microsoft Symbol Server...",
+						std::move(detail)
+					});
+					nextProgress = now + std::chrono::milliseconds{ 100 };
 				}
-				const winrt::Windows::Web::Http::HttpResponseMessage response = responseOperation.get();
-				THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_CANCELLED), stopToken.stop_requested());
-				response.EnsureSuccessStatusCode();
-
-				uint64_t totalBytes = 0;
-				if (const auto length = response.Content().Headers().ContentLength())
-				{
-					totalBytes = length.Value();
-				}
-
-				std::filesystem::path destination{ destinationPath.c_str() };
-				std::error_code removeError;
-				std::filesystem::remove(destination, removeError);
-
-				wil::unique_hfile file
-				{
-					CreateFileW(
-						destination.c_str(),
-						GENERIC_WRITE,
-						0,
-						nullptr,
-						CREATE_ALWAYS,
-						FILE_ATTRIBUTE_NORMAL,
-						nullptr
-					)
-				};
-				THROW_LAST_ERROR_IF(!file);
-
-				bool completed = false;
-				const auto cleanup = wil::scope_exit([&]
-				{
-					file.reset();
-					if (!completed)
-					{
-						std::error_code cleanupError;
-						std::filesystem::remove(destination, cleanupError);
-					}
-				});
-
-				auto streamOperation = response.Content().ReadAsInputStreamAsync();
-				if (streamOperation.wait_for(std::chrono::seconds{ SymbolDownloadTimeoutSeconds }) == winrt::Windows::Foundation::AsyncStatus::Started)
-				{
-					streamOperation.Cancel();
-					THROW_HR(HRESULT_FROM_WIN32(ERROR_TIMEOUT));
-				}
-				const auto stream = streamOperation.get();
-				winrt::Windows::Storage::Streams::Buffer buffer{ 128 * 1024 };
-
-				uint64_t downloaded = 0;
-				for (;;)
-				{
-					THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_CANCELLED), stopToken.stop_requested());
-
-					auto readOperation = stream.ReadAsync(
-						buffer,
-						buffer.Capacity(),
-						winrt::Windows::Storage::Streams::InputStreamOptions::Partial
-					);
-					if (readOperation.wait_for(std::chrono::seconds{ SymbolDownloadTimeoutSeconds }) == winrt::Windows::Foundation::AsyncStatus::Started)
-					{
-						readOperation.Cancel();
-						THROW_HR(HRESULT_FROM_WIN32(ERROR_TIMEOUT));
-					}
-					const auto read = readOperation.get();
-					if (read.Length() == 0)
-					{
-						break;
-					}
-
-					DWORD written = 0;
-					THROW_IF_WIN32_BOOL_FALSE(WriteFile(file.get(), read.data(), read.Length(), &written, nullptr));
-
-					downloaded += read.Length();
-
-					double pct = -1.0;
-					if (totalBytes > 0)
-					{
-						pct = (static_cast<double>(downloaded) / static_cast<double>(totalBytes)) * 100.0;
-					}
-
-					if (progressCallback)
-					{
-						progressCallback(RawDownloadProgress{
-							pct,
-							totalBytes,
-							downloaded,
-							static_cast<uint32_t>(read.Length())
-						});
-					}
-				}
-
-				completed = true;
-				return S_OK;
 			}
-			catch (...)
-			{
-				return wil::ResultFromCaughtException();
-			}
-		};
+			// A stream can report EOF without rejecting a truncated Content-Length body.
+			THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_HANDLE_EOF), length && downloaded != totalBytes);
+			THROW_IF_WIN32_BOOL_FALSE(FlushFileBuffers(file.get()));
+			THROW_IF_WIN32_BOOL_FALSE(CloseHandle(file.release()));
+			THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_CANCELLED), stopToken.stop_requested());
+			THROW_IF_WIN32_BOOL_FALSE(MoveFileExW(stagingPath.c_str(), targetPath.c_str(), MOVEFILE_REPLACE_EXISTING));
+			completed = true;
+		}
 
 		std::wstring GetSystemModulePath(PCWSTR moduleName)
 		{
@@ -183,7 +166,6 @@ namespace OpenGlass
 
 			return (std::filesystem::path{ systemPath } / moduleName).wstring();
 		}
-
 
 		std::wstring FormatHResult(HRESULT hr)
 		{
@@ -203,38 +185,6 @@ namespace OpenGlass
 
 			return std::format(L"Failed to download {} ({}).", itemName, FormatHResult(hr));
 		}
-
-		HRESULT BuildModuleDownloadInfo(const std::wstring& modulePath, PCWSTR moduleName, LPCWSTR symbolServerBase, ModuleDownloadInfo& info)
-		{
-			info = {};
-			info.moduleName = moduleName;
-			info.modulePath = modulePath;
-
-			PeCodeViewIdentity identity{};
-			RETURN_IF_FAILED(ReadFilePeCodeViewIdentity(modulePath.c_str(), identity));
-			info.pdbFileName = identity.pdbName;
-
-			info.url = BuildSymbolServerUrl(symbolServerBase, identity);
-			return S_OK;
-		}
-
-		SymbolDownloadProgress MakeProgress(int percent, bool indeterminate, std::wstring phase, std::wstring detail)
-		{
-			return SymbolDownloadProgress{
-				percent,
-				indeterminate,
-				std::move(phase),
-				std::move(detail)
-			};
-		}
-
-		void ReportProgress(const SymbolDownloadProgressCallback& progressCallback, SymbolDownloadProgress progress)
-		{
-			if (progressCallback)
-			{
-				progressCallback(progress);
-			}
-		}
 	}
 
 	std::wstring GetSymbolCacheDirectory()
@@ -245,159 +195,112 @@ namespace OpenGlass
 	SymbolDownloadOutcome DownloadSymbols(std::wstring symbolDirectory, const std::stop_token& stopToken, const SymbolDownloadProgressCallback& progressCallback)
 	{
 		SymbolDownloadOutcome outcome{};
-		outcome.symbolDirectory = symbolDirectory.empty() ? GetSymbolCacheDirectory() : std::move(symbolDirectory);
-
-		const HRESULT roInitResult = RoInitialize(RO_INIT_MULTITHREADED);
-		const auto roScope = wil::scope_exit([roInitResult]
+		std::wstring downloading{ L"symbols" };
+		try
 		{
-			if (SUCCEEDED(roInitResult))
+			THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_CANCELLED), stopToken.stop_requested());
+			outcome.symbolDirectory = symbolDirectory.empty() ? GetSymbolCacheDirectory() : std::move(symbolDirectory);
+
+			const HRESULT roInitResult = RoInitialize(RO_INIT_MULTITHREADED);
+			const auto roScope = wil::scope_exit([roInitResult]
 			{
-				RoUninitialize();
-			}
-		});
-
-		if (FAILED(roInitResult) && roInitResult != RPC_E_CHANGED_MODE)
-		{
-			outcome.result = SymbolDownloadResult::Failed;
-			outcome.hr = roInitResult;
-			outcome.summary = std::format(L"Failed to initialize the Windows Runtime ({}).", FormatHResult(roInitResult));
-			return outcome;
-		}
-
-		std::error_code directoryError;
-		std::filesystem::create_directories(outcome.symbolDirectory, directoryError);
-		if (directoryError)
-		{
-			outcome.result = SymbolDownloadResult::Failed;
-			outcome.hr = HRESULT_FROM_WIN32(directoryError.value());
-			outcome.summary = std::format(L"Failed to create the symbols directory:\n{}", outcome.symbolDirectory);
-			return outcome;
-		}
-
-		const auto downloader = std::make_unique<CSymbolDownloader>();
-		constexpr LPCWSTR symbolServerBase = L"https://msdl.microsoft.com/download/symbols/";
-		struct ModuleSpec
-		{
-			LPCWSTR name;
-			int basePercent;
-		};
-		constexpr ModuleSpec modules[]
-		{
-			{ L"uDWM.dll", 0 },
-			{ L"dwmcore.dll", 50 },
-		};
-
-		for (const auto& module : modules)
-		{
-			if (stopToken.stop_requested())
-			{
-				outcome.result = SymbolDownloadResult::Cancelled;
-				outcome.hr = HRESULT_FROM_WIN32(ERROR_CANCELLED);
-				outcome.summary = L"Symbol download cancelled.";
-				return outcome;
-			}
-
-			const std::wstring modulePath = GetSystemModulePath(module.name);
-			if (modulePath.empty())
-			{
-				outcome.result = SymbolDownloadResult::Failed;
-				outcome.hr = HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
-				outcome.summary = std::format(L"Failed to locate {} in the system directory.", module.name);
-				return outcome;
-			}
-
-			ModuleDownloadInfo info{};
-			HRESULT hr = BuildModuleDownloadInfo(modulePath, module.name, symbolServerBase, info);
-			if (FAILED(hr))
-			{
-				outcome.result = hr == HRESULT_FROM_WIN32(ERROR_CANCELLED) ? SymbolDownloadResult::Cancelled : SymbolDownloadResult::Failed;
-				outcome.hr = hr;
-				outcome.summary = std::format(L"Failed to prepare symbol download for {} ({}).", module.name, FormatHResult(hr));
-				outcome.details = std::format(L"Module: {}\nPath: {}", module.name, modulePath);
-				return outcome;
-			}
-
-			ReportProgress(
-				progressCallback,
-				MakeProgress(
-					module.basePercent,
-					true,
-					L"Connecting to Microsoft Symbol Server...",
-					std::format(L"Preparing {}", info.pdbFileName)
-				)
-			);
-
-			const auto destinationPath = (std::filesystem::path{ outcome.symbolDirectory } / info.pdbFileName).wstring();
-			auto rawProgressCallback = [&](const RawDownloadProgress& progress)
-			{
-				const bool indeterminate = progress.percent < 0.0;
-				const int currentFilePercent = indeterminate
-					? -1
-					: std::clamp(static_cast<int>(progress.percent), 0, 100);
-				const int percent = indeterminate
-					? module.basePercent
-					: std::clamp(module.basePercent + static_cast<int>(progress.percent / 2.0), 0, 100);
-
-				std::wstring detail = info.pdbFileName;
-				if (progress.downloadedBytes > 0)
+				if (SUCCEEDED(roInitResult))
 				{
-					detail += std::format(L" - {} bytes", progress.downloadedBytes);
-					if (progress.totalBytes > 0)
-					{
-						detail += std::format(L" / {} bytes", progress.totalBytes);
-					}
-					if (currentFilePercent >= 0)
-					{
-						detail += std::format(L" ({}%)", currentFilePercent);
-					}
+					RoUninitialize();
 				}
-				else
-				{
-					detail = std::format(L"Requesting {} from Microsoft Symbol Server", info.pdbFileName);
-				}
+			});
+			if (FAILED(roInitResult) && roInitResult != RPC_E_CHANGED_MODE)
+			{
+				outcome.hr = roInitResult;
+				outcome.summary = std::format(L"Failed to initialize the Windows Runtime ({}).", FormatHResult(roInitResult));
+				return outcome;
+			}
 
-				ReportProgress(
-					progressCallback,
-					MakeProgress(
-						percent,
-						indeterminate,
-						indeterminate ? L"Connecting to Microsoft Symbol Server..." : std::format(L"Downloading {}", info.pdbFileName),
-						detail
-					)
-				);
+			std::error_code directoryError;
+			std::filesystem::create_directories(outcome.symbolDirectory, directoryError);
+			if (directoryError)
+			{
+				outcome.hr = HRESULT_FROM_WIN32(directoryError.value());
+				outcome.summary = std::format(L"Failed to create the symbols directory:\n{}", outcome.symbolDirectory);
+				return outcome;
+			}
+
+			const winrt::Windows::Web::Http::HttpClient client;
+			constexpr LPCWSTR symbolServerBase = L"https://msdl.microsoft.com/download/symbols/";
+			struct ModuleSpec
+			{
+				LPCWSTR name;
+				int basePercent;
+			};
+			constexpr ModuleSpec modules[]
+			{
+				{ L"uDWM.dll", 0 },
+				{ L"dwmcore.dll", 50 },
 			};
 
-			hr = downloader->Download(stopToken, info.url.c_str(), destinationPath.c_str(), rawProgressCallback);
-			if (FAILED(hr))
+			for (const auto& module : modules)
 			{
-				outcome.result = hr == HRESULT_FROM_WIN32(ERROR_CANCELLED) ? SymbolDownloadResult::Cancelled : SymbolDownloadResult::Failed;
-				outcome.hr = hr;
-				outcome.summary = outcome.result == SymbolDownloadResult::Cancelled
-					? L"Symbol download cancelled."
-					: DescribeDownloadFailure(info.pdbFileName, hr);
+				THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_CANCELLED), stopToken.stop_requested());
+				outcome.details.clear();
+				const auto modulePath = GetSystemModulePath(module.name);
+				if (modulePath.empty())
+				{
+					outcome.hr = HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
+					outcome.summary = std::format(L"Failed to locate {} in the system directory.", module.name);
+					return outcome;
+				}
+
+				PeCodeViewIdentity identity{};
+				const HRESULT hr = ReadFilePeCodeViewIdentity(modulePath.c_str(), identity);
+				if (FAILED(hr))
+				{
+					outcome.hr = hr;
+					outcome.summary = std::format(L"Failed to prepare symbol download for {} ({}).", module.name, FormatHResult(hr));
+					outcome.details = std::format(L"Module: {}\nPath: {}", module.name, modulePath);
+					return outcome;
+				}
+
+				const auto url = BuildSymbolServerUrl(symbolServerBase, identity);
+				downloading = identity.pdbName;
 				outcome.details = std::format(
-					L"Module: {}\nPath: {}\nPDB: {}\nURL: {}",
-					info.moduleName,
-					info.modulePath,
-					info.pdbFileName,
-					info.url
+					L"Module: {}\nPath: {}\nPDB: {}\nURL: {}", module.name, modulePath, identity.pdbName, url
 				);
-				return outcome;
+				if (progressCallback)
+				{
+					progressCallback(SymbolDownloadProgress{
+						module.basePercent, true, L"Connecting to Microsoft Symbol Server...",
+						std::format(L"Requesting {} from Microsoft Symbol Server", identity.pdbName)
+					});
+				}
+
+				DownloadSymbolFile(
+					client, stopToken, url.c_str(),
+					std::filesystem::path{ outcome.symbolDirectory } / identity.pdbName,
+					module.basePercent, progressCallback
+				);
+				if (progressCallback)
+				{
+					progressCallback(SymbolDownloadProgress{
+						module.basePercent + 50, false,
+						std::format(L"Finished {}", identity.pdbName), L"Local symbol cache updated."
+					});
+				}
 			}
 
-			ReportProgress(
-				progressCallback,
-				MakeProgress(
-					module.basePercent + 50,
-					false,
-					std::format(L"Finished {}", info.pdbFileName),
-					L"Local symbol cache updated."
-				)
-			);
+			outcome.result = SymbolDownloadResult::Success;
+			outcome.summary = L"Required symbols downloaded successfully.";
+			outcome.details.clear();
 		}
-
-		outcome.result = SymbolDownloadResult::Success;
-		outcome.summary = L"Required symbols downloaded successfully.";
+		catch (...)
+		{
+			// This is the worker entry point: activation, paths and callbacks can throw
+			// as well as network operations, and none may escape the GUI's jthread.
+			outcome.hr = stopToken.stop_requested() ? HRESULT_FROM_WIN32(ERROR_CANCELLED) : wil::ResultFromCaughtException();
+			outcome.result = outcome.hr == HRESULT_FROM_WIN32(ERROR_CANCELLED)
+				? SymbolDownloadResult::Cancelled : SymbolDownloadResult::Failed;
+			outcome.summary = outcome.result == SymbolDownloadResult::Cancelled
+				? L"Symbol download cancelled." : DescribeDownloadFailure(downloading, outcome.hr);
+		}
 		return outcome;
 	}
 }

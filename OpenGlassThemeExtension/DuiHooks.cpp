@@ -16,6 +16,8 @@ namespace OpenGlass::DuiHooks
 	HRESULT MyCGlassColorCplPage_HandleNavigateAway(PVOID This);
 	HRESULT MyDirectUI_XResourceProvider_Create(HINSTANCE resources, PCWSTR resource, PCWSTR element, PCWSTR theme, DirectUI::IXProviderCP** output);
 
+	// x64 themecpl 10.0.22621.4745 / 10.0.26100.9549: Save and swatch Enter
+	// dispatch through slot 0; OnNavigateAway and _Setup use slot 5.
 	struct CColorCplPageHandlerVtable
 	{
 		void (*HandleOK)(PVOID);
@@ -35,7 +37,8 @@ namespace OpenGlass::DuiHooks
 		HRESULT _SetTransparency(bool enabled);
 		void _UpdateSwatchName();
 
-		// verified in x64 themecpl 10.0.22621.4745 and 10.0.26100.9549. See Design.md.
+		// x64 themecpl 10.0.22621.4745 / 10.0.26100.9549: constructor and
+		// CColorCplPage::_Setup agree on the handler subobject at page + 0xD0.
 		static constexpr size_t CGlassColorCplPage_CColorCplPageHandler_Offset = 208;
 
 		struct HandlerVtable

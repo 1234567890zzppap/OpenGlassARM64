@@ -39,6 +39,7 @@ namespace OpenGlass
 		bool m_preferCustomSelection{};
 		bool m_settingSelection{};
 		bool m_invoking{};
+		int m_layoutWidth{ -1 };
 		bool m_layoutPending{};
 	};
 }

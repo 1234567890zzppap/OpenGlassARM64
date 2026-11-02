@@ -32,10 +32,28 @@ namespace OpenGlass::GlassService
 
 HRESULT GlassService::OpenUserRegistryForDwm(RequestBuffer& content, DWORD processId) try
 {
+	content.dwmKey = nullptr;
+	content.personalizeKey = nullptr;
 	wil::unique_handle processHandle{ OpenProcess(PROCESS_DUP_HANDLE, FALSE, processId) };
 	THROW_LAST_ERROR_IF_NULL(processHandle);
 	DWORD sessionId{ 0 };
 	THROW_IF_WIN32_BOOL_FALSE(ProcessIdToSessionId(processId, &sessionId));
+	DWORD bytesReturned{};
+	wil::unique_wtsmem_ptr<WTS_CONNECTSTATE_CLASS> state{};
+	THROW_IF_WIN32_BOOL_FALSE(
+		WTSQuerySessionInformationW(
+			WTS_CURRENT_SERVER_HANDLE,
+			sessionId,
+			WTSConnectState,
+			wil::out_param_ptr<LPWSTR*>(state),
+			&bytesReturned
+		)
+	);
+	THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_INVALID_DATA), !state || bytesReturned < sizeof(WTS_CONNECTSTATE_CLASS));
+	if (*state != WTSActive)
+	{
+		return S_OK;
+	}
 	wil::unique_handle token{ nullptr };
 	THROW_IF_WIN32_BOOL_FALSE(WTSQueryUserToken(sessionId, &token));
 	wil::unique_handle duplicatedToken{ nullptr };
@@ -452,16 +470,14 @@ HRESULT GlassService::RunInjectionThread(const ThreadControl& control)
 				return true;
 			}
 
+			wil::unique_handle processHandle{ OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, processId) };
+			if (!processHandle)
 			{
-				wil::unique_handle processHandle{ OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, processId) };
-				if (!processHandle)
-				{
-					return true;
-				}
-				if (!IsDwmProcess(processHandle.get()) || g_dwmInjectionBlackList.find(processId) != g_dwmInjectionBlackList.end())
-				{
-					return true;
-				}
+				return true;
+			}
+			if (!IsDwmProcess(processHandle.get()) || g_dwmInjectionBlackList.find(processId) != g_dwmInjectionBlackList.end())
+			{
+				return true;
 			}
 
 			if (!IsOpenGlassAlreadyLoaded(processId))
@@ -470,18 +486,21 @@ HRESULT GlassService::RunInjectionThread(const ThreadControl& control)
 				const auto it = g_dwmInjectionMap.find(sessionId);
 				if (it != g_dwmInjectionMap.end())
 				{
-					const auto& [injectionTimeStamp, processHandle] = it->second;
+					const auto& [injectionTimeStamp, previousProcessHandle] = it->second;
 
 					DWORD exitCode{ 0 };
-					LOG_IF_WIN32_BOOL_FALSE(GetExitCodeProcess(processHandle.get(), &exitCode));
+					LOG_IF_WIN32_BOOL_FALSE(GetExitCodeProcess(previousProcessHandle.get(), &exitCode));
 					// DWM constantly crashes or manual fast fail triggered by user
 					if (
+						exitCode != STILL_ACTIVE &&
 						(
-							currentTimeStamp - injectionTimeStamp <= std::chrono::seconds{ 15 } &&
-							// DWM shutdown by session manager
-							exitCode != 0xD00002FE
-						) ||
-						exitCode == 0xC0000409
+							(
+								currentTimeStamp - injectionTimeStamp <= std::chrono::seconds{ 15 } &&
+								// DWM shutdown by session manager
+								exitCode != 0xD00002FE
+							) ||
+							exitCode == 0xC0000409
+						)
 					)
 					{
 						auto title = Util::GetResourceStringView<IDS_STRING101>();
@@ -514,10 +533,10 @@ HRESULT GlassService::RunInjectionThread(const ThreadControl& control)
 					}
 				}
 
-				if (const auto hresult = InjectOpenGlassDLL(processId, true); SUCCEEDED(hresult))
-				{
-					g_dwmInjectionMap.insert_or_assign(sessionId, CDwmProcessInfo{ currentTimeStamp, OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, processId) });
-				}
+				// Retain the verified process before Startup can fail. Injection waits
+				// for initialization, so a startup crash must also reach the guard.
+				g_dwmInjectionMap.insert_or_assign(sessionId, CDwmProcessInfo{ currentTimeStamp, processHandle.release() });
+				LOG_IF_FAILED(InjectOpenGlassDLL(processId, true));
 			}
 
 			return true;

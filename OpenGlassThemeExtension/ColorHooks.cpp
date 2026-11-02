@@ -14,6 +14,8 @@ namespace OpenGlass::ColorHooks
 {
 	HRESULT WINAPI MySetUserColorPreference(const void*, bool);
 
+	// themeui/ntdll 10.0.26100.9549: an unresolved delay thunk resolves back to
+	// the installed IAT replacement. The color replacements do not call these originals.
 	struct ModuleHooks
 	{
 		PCWSTR m_moduleName{};

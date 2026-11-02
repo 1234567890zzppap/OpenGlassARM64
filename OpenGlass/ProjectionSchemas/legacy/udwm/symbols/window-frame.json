@@ -1,0 +1,321 @@
+{
+  "symbols": [
+    {
+      "name": "Symbol_CTopLevelWindow_UpdateButtonVisuals",
+      "id": "CTopLevelWindow::UpdateButtonVisuals",
+      "bindings": [
+        {
+          "platform": null,
+          "target": "&CTopLevelWindow::UpdateButtonVisuals",
+          "ranges": [
+            {
+              "symbol_names": [
+                "private: long __cdecl CTopLevelWindow::UpdateButtonVisuals(struct CTopLevelWindow::WindowFrame const * __ptr64) __ptr64"
+              ],
+              "min_inclusive": {
+                "build": 22000,
+                "revision": 0
+              },
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "projected_function"
+    },
+    {
+      "name": "Symbol_CTopLevelWindow_s_rgpwfWindowFrames",
+      "id": "CTopLevelWindow::s_rgpwfWindowFrames",
+      "bindings": [
+        {
+          "platform": null,
+          "target": "&CTopLevelWindow::s_rgpwfWindowFrames",
+          "ranges": [
+            {
+              "symbol_names": [
+                "private: static class DynArray<struct CTopLevelWindow::WindowFrame * __ptr64,0> CTopLevelWindow::s_rgpwfWindowFrames"
+              ],
+              "min_inclusive": null,
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "projected_variable"
+    },
+    {
+      "name": "Symbol_CTopLevelWindow_UpdateNCAreaBackground",
+      "id": "CTopLevelWindow::UpdateNCAreaBackground",
+      "bindings": [
+        {
+          "platform": null,
+          "type": "HRESULT (*)(CTopLevelWindow*)",
+          "ranges": [
+            {
+              "symbol_names": [
+                "private: long __cdecl CTopLevelWindow::UpdateNCAreaBackground(void) __ptr64"
+              ],
+              "min_inclusive": null,
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "raw"
+    },
+    {
+      "name": "Symbol_CTopLevelWindow_UpdateNCAreaPositionsAndSizes",
+      "id": "CTopLevelWindow::UpdateNCAreaPositionsAndSizes",
+      "bindings": [
+        {
+          "platform": null,
+          "type": "HRESULT (*)(CTopLevelWindow*)",
+          "ranges": [
+            {
+              "symbol_names": [
+                "private: long __cdecl CTopLevelWindow::UpdateNCAreaPositionsAndSizes(void) __ptr64"
+              ],
+              "min_inclusive": null,
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "raw"
+    },
+    {
+      "name": "Symbol_CTopLevelWindow_IsShadowNCAreaPart",
+      "id": "CTopLevelWindow::IsShadowNCAreaPart",
+      "bindings": [
+        {
+          "platform": "x64",
+          "type": "BYTE*",
+          "ranges": [
+            {
+              "symbol_names": [
+                "private: static bool __cdecl CTopLevelWindow::IsShadowNCAreaPart(unsigned int)"
+              ],
+              "min_inclusive": {
+                "build": 26100,
+                "revision": 0
+              },
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "raw",
+      "usage": "code_address"
+    },
+    {
+      "name": "Symbol_CProjectionBorderVisual_UpdateRectFromWindow",
+      "id": "CProjectionBorderVisual::UpdateRectFromWindow",
+      "bindings": [
+        {
+          "platform": null,
+          "type": "void (*)(CProjectionBorderVisual*, CWindowData*)",
+          "ranges": [
+            {
+              "symbol_names": [
+                "public: void __cdecl CProjectionBorderVisual::UpdateRectFromWindow(class CWindowData * __ptr64) __ptr64"
+              ],
+              "min_inclusive": null,
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "raw"
+    },
+    {
+      "name": "Symbol_CSolidRectangleVisual_UpdateRect",
+      "id": "CSolidRectangleVisual::UpdateRect",
+      "bindings": [
+        {
+          "platform": null,
+          "type": "void (*)(CSolidRectangleVisual*, const RECT&)",
+          "ranges": [
+            {
+              "symbol_names": [
+                "public: void __cdecl CSolidRectangleVisual::UpdateRect(struct tagRECT const & __ptr64) __ptr64"
+              ],
+              "min_inclusive": {
+                "build": 22621
+              },
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "raw",
+      "notes": "22621.6630 and 26100.8972 CProjectionBorderVisual::UpdateRectFromWindow forward the unadjusted this address to this inherited setter. Earlier Legacy revisions use their own CProjectionBorderVisual::UpdateRect. This setter does not apply to the container shim."
+    },
+    {
+      "name": "Symbol_CProjectionBorderVisualShim_UpdateRectFromWindow",
+      "id": "CProjectionBorderVisualShim::UpdateRectFromWindow",
+      "bindings": [
+        {
+          "platform": null,
+          "type": "void (*)(CProjectionBorderVisualShim*, CWindowData*)",
+          "ranges": [
+            {
+              "symbol_names": [
+                "public: void __cdecl CProjectionBorderVisualShim::UpdateRectFromWindow(class CWindowData * __ptr64) __ptr64"
+              ],
+              "min_inclusive": null,
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "optional",
+      "kind": "raw",
+      "notes": "Newer revisions wrap either projection-border or capture-border visuals in a CContainerVisual shim. Select this entry at startup when it exists, retaining its native feature, corner and DPI updates; older revisions use the unwrapped projection visual."
+    },
+    {
+      "name": "Symbol_CProjectionBorderVisualShim_UpdateRect",
+      "id": "CProjectionBorderVisualShim::UpdateRect",
+      "bindings": [
+        {
+          "platform": null,
+          "type": "void (*)(CProjectionBorderVisualShim*, const RECT&)",
+          "ranges": [
+            {
+              "symbol_names": [
+                "public: void __cdecl CProjectionBorderVisualShim::UpdateRect(struct tagRECT const & __ptr64) __ptr64"
+              ],
+              "min_inclusive": null,
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "optional",
+      "kind": "raw"
+    },
+    {
+      "name": "Symbol_CSecondaryWindowRepresentation_CalculateWindowMetrics",
+      "id": "CSecondaryWindowRepresentation::CalculateWindowMetrics",
+      "bindings": [
+        {
+          "platform": null,
+          "type": "bool (*)(CSecondaryWindowRepresentation*, SIZE*, MARGINS*)",
+          "ranges": [
+            {
+              "symbol_names": [
+                "private: bool __cdecl CSecondaryWindowRepresentation::CalculateWindowMetrics(struct tagSIZE * __ptr64,struct _MARGINS * __ptr64) __ptr64"
+              ],
+              "min_inclusive": {
+                "build": 22621
+              },
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "raw"
+    },
+    {
+      "name": "Symbol_CWindowData_NotifySWROfMarginOrSizeChange",
+      "id": "CWindowData::NotifySWROfMarginOrSizeChange",
+      "bindings": [
+        {
+          "platform": null,
+          "type": "void (*)(CWindowData*, bool, bool)",
+          "ranges": [
+            {
+              "symbol_names": [
+                "public: void __cdecl CWindowData::NotifySWROfMarginOrSizeChange(bool,bool) __ptr64"
+              ],
+              "min_inclusive": {
+                "build": 22000
+              },
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "raw"
+    },
+    {
+      "name": "Symbol_CProjectionBorderVisual_UpdateRect",
+      "id": "CProjectionBorderVisual::UpdateRect",
+      "bindings": [
+        {
+          "platform": null,
+          "type": "void (*)(CProjectionBorderVisual*, const RECT&)",
+          "ranges": [
+            {
+              "symbol_names": [
+                "public: void __cdecl CProjectionBorderVisual::UpdateRect(struct tagRECT const & __ptr64) __ptr64"
+              ],
+              "min_inclusive": null,
+              "max_exclusive": {
+                "build": 22621
+              }
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "raw"
+    },
+    {
+      "name": "Symbol_CSecondaryWindowRepresentation_s_CalculateWindowMetrics",
+      "id": "CSecondaryWindowRepresentation::s_CalculateWindowMetrics",
+      "bindings": [
+        {
+          "platform": null,
+          "type": "bool (*)(const CWindowData*, DWORD, bool, SIZE*, MARGINS*)",
+          "ranges": [
+            {
+              "symbol_names": [
+                "private: static bool __cdecl CSecondaryWindowRepresentation::s_CalculateWindowMetrics(class CWindowData const * __ptr64,struct TMILFlagsEnum<enum SWRUsage::FlagsEnum>,bool,struct tagSIZE * __ptr64,struct _MARGINS * __ptr64)"
+              ],
+              "min_inclusive": {
+                "build": 22000
+              },
+              "max_exclusive": {
+                "build": 22621
+              }
+            }
+          ]
+        }
+      ],
+      "requirement": "required",
+      "kind": "raw",
+      "notes": "22000.194 passes SWRUsage as a four-byte value in EDX; the third argument selects whether client-only metrics retain their margins. OnMarginsOrSizeUpdated passes the already selected representation data. Keep this static ABI separate from the later member CalculateWindowMetrics."
+    },
+    {
+      "name": "Symbol_CTopLevelWindow_UpdatePinnedParts",
+      "id": "CTopLevelWindow::UpdatePinnedParts",
+      "kind": "raw",
+      "requirement": "required",
+      "bindings": [
+        {
+          "platform": null,
+          "type": "HRESULT (*)(CTopLevelWindow*)",
+          "ranges": [
+            {
+              "symbol_names": [
+                "private: long __cdecl CTopLevelWindow::UpdatePinnedParts(void) __ptr64"
+              ],
+              "min_inclusive": null,
+              "max_exclusive": null
+            }
+          ]
+        }
+      ],
+      "notes": "UpdateNCAreaPositionsAndSizes calls this after establishing non-client layout. Its final loop realizes the side and bottom atlas/primitive dimensions; UpdateWindowVisuals only supplies their initial bitmap dimensions. Refresh visible-frame consumers after this step. Direct callers consume HRESULT with a fresh test and restore nonvolatile registers."
+    }
+  ]
+}

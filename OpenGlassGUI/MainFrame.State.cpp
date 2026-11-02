@@ -71,6 +71,7 @@ namespace OpenGlass
 	bool MainFrame::CanSyncExternalChanges() const
 	{
 		return !m_isDirty && !m_preview.IsDirty() && !m_colorPreference.IsDirty() && !m_resources.IsDirty()
+			&& !m_presetWorkActive && !m_configurationOperationActive
 			&& !m_preview.IsAttemptActive() && !m_closeWhenSymbolDownloadStops && !IsBeingDeleted();
 	}
 
@@ -87,6 +88,8 @@ namespace OpenGlass
 
 	void MainFrame::LoadSettings()
 	{
+		// Sync must recheck files even when the stored path has not changed.
+		for (auto& warning : m_pathWarnings) warning.initialized = false;
 		// System
 		m_chkDisableGlassOnBattery->SetValue(m_config->GetDword(L"DisableGlassOnBattery", 1) != 0);
 
@@ -96,6 +99,7 @@ namespace OpenGlass
 		m_clDisabledHooks->Check(2, (hookMask & 0x4) != 0);
 		m_clDisabledHooks->Check(3, (hookMask & 0x8) != 0);
 		m_clDisabledHooks->Check(4, (hookMask & 0x10) != 0);
+		m_clUxMitigation->Check(0, (m_config->GetDword(L"EnableUxMitigation", UxMitigation::DefaultFlags) & UxMitigation::RestrictAccentOverride) != 0);
 
 		// Theme
 		std::wstring atlas = m_config->GetString(L"CustomThemeAtlas", L"");
@@ -118,19 +122,7 @@ namespace OpenGlass
 		m_slReflectionIntensity->SetValue(m_config->GetDword(L"ColorizationGlassReflectionIntensity", 0));
 		syncSliderTooltip(m_slReflectionIntensity);
 
-		DWORD refOpacityActive = m_config->GetDword(L"ColorizationGlassReflectionOpacity", 0xFFFFFFFE);
-		DWORD refOpacityInactive = m_config->GetDword(L"ColorizationGlassReflectionOpacityInactive", refOpacityActive);
-		DWORD refOpacityMaximized = m_config->GetDword(L"ColorizationGlassReflectionOpacityMaximized", refOpacityActive);
-		DWORD refOpacityInactiveMaximized = m_config->GetDword(L"ColorizationGlassReflectionOpacityInactiveMaximized", refOpacityInactive);
-
-		ApplyChoiceSlider(m_chModeReflectionOpacity, m_slReflectionOpacity, refOpacityActive, 0xFFFFFFFF, 0xFFFFFFFE, 50);
-		ApplyChoiceSlider(m_chModeReflectionOpacityInactive, m_slReflectionOpacityInactive, refOpacityInactive, 0xFFFFFFFF, 0xFFFFFFFE, 50);
-		ApplyChoiceSlider(m_chModeReflectionOpacityMaximized, m_slReflectionOpacityMaximized, refOpacityMaximized, 0xFFFFFFFF, 0xFFFFFFFE, 50);
-		ApplyChoiceSlider(m_chModeReflectionOpacityInactiveMaximized, m_slReflectionOpacityInactiveMaximized, refOpacityInactiveMaximized, 0xFFFFFFFF, 0xFFFFFFFE, 50);
-		syncSliderTooltip(m_slReflectionOpacity);
-		syncSliderTooltip(m_slReflectionOpacityInactive);
-		syncSliderTooltip(m_slReflectionOpacityMaximized);
-		syncSliderTooltip(m_slReflectionOpacityInactiveMaximized);
+		LoadOpacitySettings(true);
 
 		m_slReflectionParallax->SetValue(m_config->GetDword(L"ColorizationGlassReflectionParallaxIntensity", 13));
 		syncSliderTooltip(m_slReflectionParallax);
@@ -210,16 +202,9 @@ namespace OpenGlass
 		const DWORD colorIntensity = std::clamp<DWORD>(m_config->GetDword(L"GlassOpacity", 63), ColorizationPresets::ClassicIntensityMinimum, ColorizationPresets::ClassicIntensityMaximum);
 		m_slColorIntensity->SetValue(colorIntensity);
 		syncSliderTooltip(m_slColorIntensity);
+		LoadColorizationBalances();
 
-		DWORD captionActive = m_config->GetDword(L"ColorizationColorCaption", 0xFFFFFFFD);
-		DWORD captionInactive = m_config->GetDword(L"ColorizationColorCaptionInactive", captionActive);
-		DWORD captionMaximized = m_config->GetDword(L"ColorizationColorCaptionMaximized", captionActive);
-		DWORD captionInactiveMaximized = m_config->GetDword(L"ColorizationColorCaptionInactiveMaximized", captionInactive);
-
-		ApplyChoiceColorEx(m_chModeColorCaption, m_cpColorCaption, captionActive, 0xFFFFFFFE, 0xFFFFFFFD, 0xFFFFFFFF);
-		ApplyChoiceColorEx(m_chModeColorCaptionInactive, m_cpColorCaptionInactive, captionInactive, 0xFFFFFFFE, 0xFFFFFFFD, 0xFFFFFFFF);
-		ApplyChoiceColorEx(m_chModeColorCaptionMaximized, m_cpColorCaptionMaximized, captionMaximized, 0xFFFFFFFE, 0xFFFFFFFD, 0xFFFFFFFF);
-		ApplyChoiceColorEx(m_chModeColorCaptionInactiveMaximized, m_cpColorCaptionInactiveMaximized, captionInactiveMaximized, 0xFFFFFFFE, 0xFFFFFFFD, 0xFFFFFFFF);
+		LoadCaptionColors();
 
 		// Advanced Blending
 		auto loadBaseColor = [&](wxChoice* ch, wxColourPickerCtrl* cp, wxSpinCtrl* sc, const std::wstring& key, DWORD themeSentinel, DWORD autoSentinel) {
@@ -252,33 +237,81 @@ namespace OpenGlass
 		DWORD priority = m_config->GetDword(L"ColorizationOpaqueBlendPriority", 0xFFFFFFFF);
 		m_chOpaqueBlendPriority->SetSelection(priority == 0xFFFFFFFF ? 2 : std::clamp<int>(priority, 0, 1));
 
-		DWORD colorOpacityActive = m_config->GetDword(L"ColorizationOpacity", 0xFFFFFFFE);
-		DWORD colorOpacityInactive = m_config->GetDword(L"ColorizationOpacityInactive", colorOpacityActive);
-		DWORD colorOpacityMaximized = m_config->GetDword(L"ColorizationOpacityMaximized", colorOpacityActive);
-		DWORD colorOpacityInactiveMaximized = m_config->GetDword(L"ColorizationOpacityInactiveMaximized", colorOpacityInactive);
-
-		ApplyChoiceSlider(m_chModeColorizationOpacity, m_slColorizationOpacity, colorOpacityActive, 0xFFFFFFFF, 0xFFFFFFFE, 100);
-		ApplyChoiceSlider(m_chModeColorizationOpacityInactive, m_slColorizationOpacityInactive, colorOpacityInactive, 0xFFFFFFFF, 0xFFFFFFFE, 100);
-		ApplyChoiceSlider(m_chModeColorizationOpacityMaximized, m_slColorizationOpacityMaximized, colorOpacityMaximized, 0xFFFFFFFF, 0xFFFFFFFE, 100);
-		ApplyChoiceSlider(m_chModeColorizationOpacityInactiveMaximized, m_slColorizationOpacityInactiveMaximized, colorOpacityInactiveMaximized, 0xFFFFFFFF, 0xFFFFFFFE, 100);
-		syncSliderTooltip(m_slColorizationOpacity);
-		syncSliderTooltip(m_slColorizationOpacityInactive);
-		syncSliderTooltip(m_slColorizationOpacityMaximized);
-		syncSliderTooltip(m_slColorizationOpacityInactiveMaximized);
+		LoadOpacitySettings(false);
 
 		// Accent
 		m_chkGlassOverrideAccent->SetValue(m_config->GetDword(L"GlassOverrideAccent", 0) != 0);
 
 		// Update UI State
 		UpdateUIVisibility();
-		UpdateOptionStatusIcons();
-		UpdatePathWarningIcons();
+	}
+
+	void MainFrame::LoadCaptionColors(bool inheritedOnly)
+	{
+		auto load = [&](Settings::Id id, wxChoice* choice, wxColourPickerCtrl* picker, DWORD fallback, bool active = false)
+		{
+			DWORD value{};
+			const bool configured = m_config->TryGetDword(std::wstring(Settings::Get(id).name), value);
+			if (!configured) value = fallback;
+			// An ordinary edit preserves explicit controls, including a new Custom choice.
+			if (!inheritedOnly || (!active && !configured))
+				ApplyChoiceColorEx(choice, picker, value, 0xFFFFFFFE, 0xFFFFFFFD, 0xFFFFFFFF);
+			return value;
+		};
+		const auto active = load(Settings::Id::ColorizationColorCaption, m_chModeColorCaption, m_cpColorCaption, 0xFFFFFFFD, true);
+		const auto inactive = load(Settings::Id::ColorizationColorCaptionInactive, m_chModeColorCaptionInactive, m_cpColorCaptionInactive, active);
+		load(Settings::Id::ColorizationColorCaptionMaximized, m_chModeColorCaptionMaximized, m_cpColorCaptionMaximized, active);
+		load(Settings::Id::ColorizationColorCaptionInactiveMaximized, m_chModeColorCaptionInactiveMaximized, m_cpColorCaptionInactiveMaximized, inactive);
+	}
+
+	void MainFrame::LoadOpacitySettings(bool reflection, bool inheritedOnly)
+	{
+		auto load = [&](Settings::Id id, wxChoice* choice, wxSlider* slider, DWORD fallback, bool active = false)
+		{
+			DWORD value{};
+			const bool configured = m_config->TryGetDword(std::wstring(Settings::Get(id).name), value);
+			if (!configured) value = fallback;
+			if (!inheritedOnly || (!active && !configured))
+			{
+				ApplyChoiceSlider(choice, slider, value, 0xFFFFFFFF, 0xFFFFFFFE, reflection ? 50 : 100);
+				slider->SetToolTip(wxString::Format(L"%d", slider->GetValue()));
+			}
+			return value;
+		};
+		if (reflection)
+		{
+			const auto active = load(Settings::Id::ColorizationGlassReflectionOpacity, m_chModeReflectionOpacity, m_slReflectionOpacity, 0xFFFFFFFE, true);
+			const auto inactive = load(Settings::Id::ColorizationGlassReflectionOpacityInactive, m_chModeReflectionOpacityInactive, m_slReflectionOpacityInactive, active);
+			load(Settings::Id::ColorizationGlassReflectionOpacityMaximized, m_chModeReflectionOpacityMaximized, m_slReflectionOpacityMaximized, active);
+			load(Settings::Id::ColorizationGlassReflectionOpacityInactiveMaximized, m_chModeReflectionOpacityInactiveMaximized, m_slReflectionOpacityInactiveMaximized, inactive);
+		}
+		else
+		{
+			const auto active = load(Settings::Id::ColorizationOpacity, m_chModeColorizationOpacity, m_slColorizationOpacity, 0xFFFFFFFE, true);
+			const auto inactive = load(Settings::Id::ColorizationOpacityInactive, m_chModeColorizationOpacityInactive, m_slColorizationOpacityInactive, active);
+			load(Settings::Id::ColorizationOpacityMaximized, m_chModeColorizationOpacityMaximized, m_slColorizationOpacityMaximized, active);
+			load(Settings::Id::ColorizationOpacityInactiveMaximized, m_chModeColorizationOpacityInactiveMaximized, m_slColorizationOpacityInactiveMaximized, inactive);
+		}
+	}
+
+	void MainFrame::LoadColorizationBalances()
+	{
+		auto load = [this](wxSlider* slider, Settings::Id id, DWORD defaultValue)
+		{
+			const auto value = std::min<DWORD>(m_config->GetDword(std::wstring(Settings::Get(id).name), defaultValue), 100);
+			slider->SetValue(value);
+			slider->SetToolTip(wxString::Format(L"%d", slider->GetValue()));
+		};
+		load(m_slColorBalance, Settings::Id::ColorizationColorBalanceOverride, 10);
+		load(m_slAfterglowBalance, Settings::Id::ColorizationAfterglowBalanceOverride, 10);
+		load(m_slBlurBalance, Settings::Id::ColorizationBlurBalanceOverride, 50);
 	}
 
 	void MainFrame::UpdateUIVisibility()
 	{
 		// 0 = Vista blur, 1 = Win7 blur
 		bool isVista = (m_rbGlassType->GetSelection() == 0);
+		m_compositionParametersPane->Show(!isVista);
 
 		if (m_colorPresetList)
 		{

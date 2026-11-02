@@ -284,6 +284,11 @@ namespace OpenGlass::uDWM
 			OPENGLASS_MUSTTAIL
 			return Projection::Invoke<&CVisual::RenderRecursive>(this);
 		}
+		inline HRESULT CloneVisualTree_Pre19041(CVisual** clonedVisual, bool option1, bool option2, bool option3)
+		{
+			OPENGLASS_MUSTTAIL
+			return Projection::Invoke<&CVisual::CloneVisualTree_Pre19041>(this, clonedVisual, option1, option2, option3);
+		}
 		inline DWORD GetDirtyFlags() const
 		{
 			return *CVisual_GetDirtyFlags.address(this);
@@ -375,6 +380,11 @@ namespace OpenGlass::uDWM
 
 	struct CRenderDataVisual : CVisual
 	{
+		inline HRESULT CloneVisualTree_Pre19041(CVisual** clone, bool option1, bool option2, bool option3)
+		{
+			OPENGLASS_MUSTTAIL
+			return Projection::Invoke<&CRenderDataVisual::CloneVisualTree_Pre19041>(this, clone, option1, option2, option3);
+		}
 		inline DynArray<CRenderDataInstruction*>& GetInstructions() const
 		{
 			return CRenderDataVisual_GetInstructions.mutable_ref(this);
@@ -490,6 +500,15 @@ namespace OpenGlass::uDWM
 		{
 			return CAtlasedRectsVisual_GetAtlasImageCount.read(this);
 		}
+		inline const MARGINS* GetClipMargins() const
+		{
+			return CAtlasedRectsVisual_ClipMargins.read(this);
+		}
+		inline HRESULT SetClipMargins(const MARGINS* margins)
+		{
+			OPENGLASS_MUSTTAIL
+			return Projection::Invoke<&CAtlasedRectsVisual::SetClipMargins>(this, margins);
+		}
 		inline HRESULT InitializeVisualTreeClone(CAtlasedRectsVisual* clonedVisual, UINT cloneOption)
 		{
 			OPENGLASS_MUSTTAIL
@@ -535,7 +554,7 @@ namespace OpenGlass::uDWM
 		{
 			return CAtlasedImage_GetParent.read(this);
 		}
-		inline DWORD& GetSize()
+		inline const SIZE& GetSize() const
 		{
 			return CAtlasedImage_GetSize.ref(this);
 		}
@@ -572,6 +591,16 @@ namespace OpenGlass::uDWM
 			OPENGLASS_MUSTTAIL
 			return Projection::Invoke<&CButton::Create>(visual);
 		}
+		inline static CButton* Construct_Pre18362(CButton* memory)
+		{
+			OPENGLASS_MUSTTAIL
+			return Projection::Invoke<&CButton::Construct_Pre18362>(memory);
+		}
+		inline HRESULT Initialize_Pre18362(IDwmChannel* channel)
+		{
+			OPENGLASS_MUSTTAIL
+			return Projection::Invoke<&CButton::Initialize_Pre18362>(this, channel);
+		}
 		inline HRESULT SetVisualStates_Win10(uDWM::CBitmapSourceArray* buttonArray,
 											 uDWM::CBitmapSourceArray* glyphArray, uDWM::CBitmapSource* glowBitmap,
 											 float opacity)
@@ -602,6 +631,10 @@ namespace OpenGlass::uDWM
 		inline float& GetGlyphOpacity()
 		{
 			return *CButton_GetGlyphOpacity.address(this);
+		}
+		inline CBitmapSource* GetGlowBitmap() const
+		{
+			return CButton_GlowBitmap.read(this);
 		}
 		inline BYTE* GetButtonState()
 		{
@@ -682,6 +715,10 @@ namespace OpenGlass::uDWM
 	};
 	struct CAccent : CRenderDataVisual
 	{
+		bool& GetParentVisible()
+		{
+			return CAccent_ParentVisible.ref(this);
+		}
 		ACCENT_POLICY& GetAccentPolicy()
 		{
 			return *CAccent_GetAccentPolicy.address(this);
@@ -704,8 +741,35 @@ namespace OpenGlass::uDWM
 
 	struct IDwmWindow;
 	struct CTopLevelWindow;
+	struct CSolidRectangleVisual : CVisual {};
+	struct CProjectionBorderVisual : CVisual {};
+	struct CProjectionBorderVisualShim : CVisual {};
+	struct CSecondaryWindowRepresentation
+	{
+		CWindowData* GetData() const
+		{
+			return CSecondaryWindowRepresentation_Data.read(this);
+		}
+		UINT GetKind() const
+		{
+			return CSecondaryWindowRepresentation_Kind.read(this);
+		}
+		DWORD GetFlags() const
+		{
+			return CSecondaryWindowRepresentation_Flags.read(this);
+		}
+	};
+
 	struct CWindowData : CBaseObject
 	{
+		inline HRESULT OnWindowSizeUpdated()
+		{
+			OPENGLASS_MUSTTAIL return Projection::Invoke<&CWindowData::OnWindowSizeUpdated>(this);
+		}
+		inline CVisual* GetProjectionBorder() const
+		{
+			return CWindowData_GetProjectionBorder.read(this);
+		}
 		inline HWND GetHwnd() const
 		{
 			return *CWindowData_GetHwnd.address(this);
@@ -868,13 +932,25 @@ namespace OpenGlass::uDWM
 			OPENGLASS_MUSTTAIL
 			return Projection::Invoke<&CTopLevelWindow::UpdateButtonVisuals>(this, windowFrame);
 		}
+		inline const CAtlasedImage* GetNCAreaAtlasImage1() const
+		{
+			return CTopLevelWindow_GetNCAreaAtlasImage1.read(this);
+		}
 		inline CAtlasedImage const*& GetNCAreaAtlasImage1()
 		{
 			return CTopLevelWindow_GetNCAreaAtlasImage1.ref(this);
 		}
+		inline const CAtlasedImage* GetNCAreaAtlasImage2() const
+		{
+			return CTopLevelWindow_GetNCAreaAtlasImage2.read(this);
+		}
 		inline CAtlasedImage const*& GetNCAreaAtlasImage2()
 		{
 			return CTopLevelWindow_GetNCAreaAtlasImage2.ref(this);
+		}
+		inline const CAtlasedImage* GetNCAreaAtlasImage3() const
+		{
+			return CTopLevelWindow_GetNCAreaAtlasImage3.read(this);
 		}
 		inline CAtlasedImage const*& GetNCAreaAtlasImage3()
 		{
@@ -1036,6 +1112,10 @@ namespace OpenGlass::uDWM
 			return (button && *button) ? *button : nullptr;
 		}
 
+		inline const MARGINS& GetFrameOutsideMargins(bool zoomed) const
+		{
+			return zoomed ? CTopLevelWindow_GetFrameOutsideMargins_Zoomed.ref(this) : CTopLevelWindow_GetFrameOutsideMargins_Normal.ref(this);
+		}
 		inline MARGINS& GetFrameOutsideMargins(bool zoomed)
 		{
 			if (zoomed)
@@ -1091,6 +1171,14 @@ namespace OpenGlass::uDWM
 		{
 			OPENGLASS_MUSTTAIL
 			return Projection::Invoke<&CTopLevelWindow::OnAccentPolicyUpdated>(this);
+		}
+		inline bool HasMaximizedClip() const
+		{
+			return (CTopLevelWindow_FrameClipFlags.read(this) & 4) != 0;
+		}
+		inline const MARGINS* GetCloneFrameMargins() const
+		{
+			return CTopLevelWindow_GetCloneFrameMargins.read(this);
 		}
 		inline RECT* GetActualWindowRect(RECT* rect, char relative, char respectMaximizedClip,
 										 bool excludeShadowMargins) const
@@ -1224,7 +1312,7 @@ namespace OpenGlass::uDWM
 	{
 #if defined(_M_ARM64)
 		// ARM64 uDWM only keeps GetWindowListForDesktop as inlined copies, so the
-		// equivalent desktop-map lookup lives in GlassKernel.cpp where the projected
+		// equivalent desktop-map lookup lives in GlassInfra.cpp where the projected
 		// Symbol handles are visible: CGenericTableMap<unsigned __int64,
 		// CWindowList::DESKTOP_WINDOWLIST_MAP_ENTRY>::FindElement.
 		PRLIST_ENTRY GetWindowListForDesktop(ULONG_PTR desktopID);

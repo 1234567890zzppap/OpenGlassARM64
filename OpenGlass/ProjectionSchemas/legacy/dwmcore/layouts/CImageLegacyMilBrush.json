@@ -1,0 +1,269 @@
+{
+  "layouts": [
+    {
+      "name": "CImageLegacyMilBrush_GetFloatResource",
+      "id": "CImageLegacyMilBrush_GetFloatResource",
+      "kind": "field",
+      "type": "CFloatResource*",
+      "cases": [
+        {
+          "platform": null,
+          "ranges": [
+            {
+              "offset": 128,
+              "until": {
+                "build": 20348,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 136,
+              "until": {
+                "build": 22000,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 136,
+              "until": {
+                "build": 22621,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 72,
+              "until": {
+                "build": 26100,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 80,
+              "otherwise": true
+            }
+          ]
+        }
+      ],
+      "notes": "CImageLegacyMilBrush::ProcessUpdate (pre-22H2) / TryDrawCommandAsDrawList null-check the CFloatResource used for opacity animation. Cross-check CChannel::ImageLegacyMilBrushUpdate, which sends its handle via MIL cmd 552."
+    },
+    {
+      "name": "CImageLegacyMilBrush_GetImageSource",
+      "id": "CImageLegacyMilBrush_GetImageSource",
+      "kind": "field",
+      "type": "CImageSource*",
+      "cases": [
+        {
+          "platform": null,
+          "ranges": [
+            {
+              "offset": 248,
+              "until": {
+                "build": 18362,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 240,
+              "until": {
+                "build": 20348,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 248,
+              "until": {
+                "build": 22000,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 248,
+              "until": {
+                "build": 22621,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 184,
+              "until": {
+                "build": 26100,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 192,
+              "otherwise": true
+            }
+          ]
+        }
+      ],
+      "notes": "CImageLegacyMilBrush::ProcessUpdate (pre-22H2) / TryDrawCommandAsDrawList\n*((QWORD *)brush + N) → CImageSource* accessed at: *(QWORD *)(brush + 192)\nCross-check: CChannel::ImageLegacyMilBrushUpdate (sends image source handle\nvia MIL cmd 561)"
+    },
+    {
+      "name": "CImageLegacyMilBrush_GetOpacityValue",
+      "id": "CImageLegacyMilBrush_GetOpacityValue",
+      "kind": "field",
+      "type": "float",
+      "cases": [
+        {
+          "platform": null,
+          "ranges": [
+            {
+              "offset": 124,
+              "until": {
+                "build": 18362,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 120,
+              "until": {
+                "build": 20348,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 128,
+              "until": {
+                "build": 22000,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 128,
+              "until": {
+                "build": 22621,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 64,
+              "until": {
+                "build": 26100,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 72,
+              "otherwise": true
+            }
+          ]
+        }
+      ],
+      "notes": "CSolidColorLegacyMilBrush::GetRealizedColor and CImageLegacyMilBrush::ProcessUpdate (pre-22H2) use inline opacity when the float resource is null. Cross-check CChannel::ImageLegacyMilBrushUpdate (MIL cmd 551) and uDWM CImageLegacyMilBrushProxy::Update (24H2+, opacity parameter)."
+    },
+    {
+      "name": "CImageLegacyMilBrush_GetOpacityValue_Double",
+      "id": "CImageLegacyMilBrush_GetOpacityValue_Double",
+      "kind": "field",
+      "type": "double",
+      "cases": [
+        {
+          "platform": null,
+          "ranges": [
+            {
+              "offset": 120,
+              "until": {
+                "build": 18362,
+                "revision": 0
+              }
+            }
+          ]
+        }
+      ],
+      "notes": "Pre-1903 CImageLegacyMilBrush::ProcessUpdate reads double opacity; later versions read float opacity."
+    },
+    {
+      "name": "CImageLegacyMilBrush_GetViewbox",
+      "id": "CImageLegacyMilBrush_GetViewbox",
+      "kind": "field",
+      "type": "D2D1_RECT_F",
+      "cases": [
+        {
+          "platform": null,
+          "ranges": [
+            {
+              "offset": 184,
+              "until": {
+                "build": 20348,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 192,
+              "until": {
+                "build": 22000,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 192,
+              "until": {
+                "build": 22621,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 120,
+              "until": {
+                "build": 26100,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 128,
+              "otherwise": true
+            }
+          ]
+        }
+      ],
+      "notes": "CImageLegacyMilBrush::ProcessUpdate (pre-22H2) copies the command viewbox; CImageLegacyMilBrushGeneratedT::SetViewbox (22H2+) stores it. Cross-check CChannel::ImageLegacyMilBrushUpdate (MIL cmd 541) and uDWM CImageLegacyMilBrushProxy::Update (24H2+, MilRectF viewbox)."
+    },
+    {
+      "name": "CImageLegacyMilBrush_GetViewport",
+      "id": "CImageLegacyMilBrush_GetViewport",
+      "kind": "field",
+      "type": "D2D1_RECT_F",
+      "cases": [
+        {
+          "platform": null,
+          "ranges": [
+            {
+              "offset": 160,
+              "until": {
+                "build": 20348,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 168,
+              "until": {
+                "build": 22000,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 168,
+              "until": {
+                "build": 22621,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 104,
+              "until": {
+                "build": 26100,
+                "revision": 0
+              }
+            },
+            {
+              "offset": 112,
+              "otherwise": true
+            }
+          ]
+        }
+      ],
+      "notes": "CImageLegacyMilBrush::ProcessUpdate (pre-22H2) copies the command viewport; CImageLegacyMilBrushGeneratedT::SetViewport (22H2+) stores it. Cross-check CChannel::ImageLegacyMilBrushUpdate (MIL cmd 539) and uDWM CImageLegacyMilBrushProxy::Update (24H2+, MilRectF viewport)."
+    }
+  ]
+}

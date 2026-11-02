@@ -103,7 +103,6 @@ namespace OpenGlass
 		Bind(wxEVT_SIZE, [this](wxSizeEvent& event) { UpdateLayout(); event.Skip(); });
 		Bind(wxEVT_DPI_CHANGED, [this](wxDPIChangedEvent& event) {
 			RebuildImages();
-			UpdateLayout();
 			event.Skip();
 		});
 		Bind(wxEVT_SYS_COLOUR_CHANGED, [this](wxSysColourChangedEvent& event) {
@@ -131,7 +130,6 @@ namespace OpenGlass
 		InsertItem(GetCustomIndex(), L"Custom", static_cast<int>(GetCustomIndex()));
 		RebuildImages();
 		Focus(0);
-		UpdateLayout();
 	}
 
 	const ColorizationPresets::Preset* ColorPresetList::GetPreset(long index) const noexcept
@@ -166,9 +164,9 @@ namespace OpenGlass
 		}
 		const bool initializeFocus = m_currentSelection < 0;
 		m_currentSelection = index;
-		// Start navigation at the applied color, but don't move the keyboard
-		// cursor during an active navigation session when settings refresh.
-		if (index >= 0 && index < GetItemCount() && (initializeFocus || !HasFocus())) Focus(index);
+		// Initialize at the applied color. Later reads must preserve navigation,
+		// including an inactive list; entering the palette handles focus separately.
+		if (index >= 0 && index < GetItemCount() && initializeFocus) Focus(index);
 		const auto previous = GetFirstSelected();
 		if (previous == index) return;
 		m_settingSelection = true;
@@ -229,6 +227,10 @@ namespace OpenGlass
 		for (const auto& preset : m_presets) images->Add(CreateSwatch(preset.argb, false));
 		images->Add(CreateSwatch(m_customColor, false));
 		AssignImageList(images.release(), wxIMAGE_LIST_NORMAL);
+		// Family, DPI and theme changes can alter image or font metrics even
+		// when the viewport width stays the same.
+		m_layoutWidth = -1;
+		UpdateLayout();
 		Refresh(false);
 	}
 
@@ -237,12 +239,13 @@ namespace OpenGlass
 		// wxWidgets supplies the Explorer theme and dark-mode window opt-in.
 		SetBackgroundColour(GetParent()->GetBackgroundColour());
 		SetTextColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT));
-		Refresh(false);
 	}
 
 	void ColorPresetList::UpdateLayout()
 	{
-		if (m_presets.empty() || GetClientSize().x <= 0) return;
+		const int width = GetClientSize().x;
+		if (m_presets.empty() || width <= 0 || width == m_layoutWidth) return;
+		m_layoutWidth = width;
 		wxWindowUpdateLocker lock(this);
 		const auto hwnd = static_cast<HWND>(GetHandle());
 		int cellWidth = FromDIP(72);

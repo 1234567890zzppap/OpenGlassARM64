@@ -22,6 +22,7 @@ namespace OpenGlass
 			const std::wstring name(Settings::Get(id).name);
 			THROW_IF_FAILED(m_config->SetDword(name, value));
 		}
+		LoadColorizationBalances();
 	}
 
 	void MainFrame::ApplyAccentColor(std::optional<DWORD> argb)
@@ -80,47 +81,9 @@ namespace OpenGlass
 		ApplyColorizationColor(preset.argb, preset.family);
 	}
 
-	const ColorizationPresets::Preset* MainFrame::FindMatchingWindows7Preset(bool opaque) const
-	{
-		if (!m_config || !m_rbGlassType || m_rbGlassType->GetSelection() != 1)
-		{
-			return nullptr;
-		}
-
-		const DWORD color = m_userConfig->GetDword(L"ColorizationColor", 0xFF000000);
-		const DWORD afterglow = m_userConfig->GetDword(L"ColorizationAfterglow", 0);
-		const DWORD colorBalance = m_config->GetDword(L"ColorizationColorBalanceOverride", 10);
-		const DWORD afterglowBalance = m_config->GetDword(L"ColorizationAfterglowBalanceOverride", 10);
-		const DWORD blurBalance = m_config->GetDword(L"ColorizationBlurBalanceOverride", 50);
-
-		for (const auto& preset : ColorizationPresets::Windows7)
-		{
-			if (ColorizationPresets::MatchesWindows7Preset(preset,
-				{ color, afterglow, colorBalance, afterglowBalance, blurBalance },
-				m_config->GetDword(L"GlassOpacity", 63), opaque))
-			{
-				return &preset;
-			}
-		}
-
-		return nullptr;
-	}
-
 	WXLRESULT MainFrame::MSWWindowProc(WXUINT message, WXWPARAM wParam, WXLPARAM lParam)
 	{
-		if (message == WM_SETTINGCHANGE && wParam == 0 && lParam
-			&& std::wstring_view(reinterpret_cast<const wchar_t*>(lParam)) == L"ImmersiveColorSet")
-		{
-			QueueColorizationRefresh();
-			if (IsBeingDeleted() || m_systemColorChangePending) return 0;
-			// wxWidgets 3.3.3 still refreshes synchronously on every accent broadcast.
-			// Merge queued notifications while retaining its normal system-colour handling.
-			m_systemColorChangePending = ::PostMessageW(GetHandle(), WM_SYSCOLORCHANGE, 0, 0) != FALSE;
-			if (m_systemColorChangePending) return 0;
-			// If posting failed, let the original notification take the normal path.
-		}
-		if (message == WM_SYSCOLORCHANGE) m_systemColorChangePending = false;
-
+		// Theme notifications can bracket a mode change: retain each deferred update.
 		const auto result = wxFrame::MSWWindowProc(message, wParam, lParam);
 		if (message == WM_DWMCOLORIZATIONCOLORCHANGED || message == WM_SETTINGCHANGE)
 		{
@@ -155,11 +118,11 @@ namespace OpenGlass
 		const bool manual = SUCCEEDED(modeResult) && !automatic;
 		m_colorPresetList->SetAutomaticDescription(SUCCEEDED(modeResult) ? wxString(L"Automatic accent color from the wallpaper")
 			: wxString::Format(L"Could not read the automatic accent color setting (0x%08lX).", modeResult));
+		const DWORD opacity = m_config->GetDword(L"GlassOpacity", 63);
+		DWORD color = m_userConfig->GetDword(L"ColorizationColor", 0xFF000000);
 		const ColorizationPresets::Preset* selectedPreset = nullptr;
 		if (m_rbGlassType->GetSelection() == 0)
 		{
-			const DWORD color = m_userConfig->GetDword(L"ColorizationColor", 0xFF000000);
-			const DWORD opacity = m_config->GetDword(L"GlassOpacity", 63);
 			for (const auto& preset : ColorizationPresets::Vista)
 			{
 				if (
@@ -174,11 +137,24 @@ namespace OpenGlass
 		}
 		else
 		{
-			selectedPreset = FindMatchingWindows7Preset(
-				m_chkEnableTransparency && !m_chkEnableTransparency->IsChecked()
-			);
+			const ColorizationPresets::Windows7Parameters parameters
+			{
+				color,
+				m_userConfig->GetDword(L"ColorizationAfterglow", 0),
+				m_config->GetDword(L"ColorizationColorBalanceOverride", 10),
+				m_config->GetDword(L"ColorizationAfterglowBalanceOverride", 10),
+				m_config->GetDword(L"ColorizationBlurBalanceOverride", 50)
+			};
+			const bool opaque = m_chkEnableTransparency && !m_chkEnableTransparency->IsChecked();
+			for (const auto& preset : ColorizationPresets::Windows7)
+			{
+				if (ColorizationPresets::MatchesWindows7Preset(preset, parameters, opacity, opaque))
+				{
+					selectedPreset = &preset;
+					break;
+				}
+			}
 		}
-		DWORD color = m_userConfig->GetDword(L"ColorizationColor", 0xFF000000);
 		bool colorAvailable = true;
 		if (SUCCEEDED(modeResult) && automatic)
 		{
@@ -188,7 +164,7 @@ namespace OpenGlass
 		if (colorAvailable && (!m_customColorsInitialized || automatic || selectedPreset == nullptr))
 		{
 			m_colorPresetList->SetCustomColor((color & 0xFFFFFF) | (ColorizationPresets::CalculateIntensityAlpha(
-				std::min<DWORD>(m_config->GetDword(L"GlassOpacity", 63), 100)) << 24));
+				std::min<DWORD>(opacity, 100)) << 24));
 		}
 		long selection = -1;
 		if (SUCCEEDED(modeResult) && automatic) selection = 0;

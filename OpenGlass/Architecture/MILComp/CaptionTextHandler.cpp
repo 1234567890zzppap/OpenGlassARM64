@@ -1,8 +1,9 @@
 #include "pch.h"
 #include "MsstyleInternals.hpp"
 #include "CaptionTextHandler.hpp"
-#include "Shared.hpp"
+#include "CaptionText.hpp"
 #include "GlassKernel.hpp"
+#include "Shared.hpp"
 #include "Util.hpp"
 #include "uDwmProjection.hpp"
 #include "dwmcoreProjection.hpp"
@@ -70,77 +71,18 @@ namespace OpenGlass::CaptionTextHandler
 	COLORREF g_captionInactiveColor{};
 	COLORREF g_captionActiveColorMaximized{};
 	COLORREF g_captionInactiveColorMaximized{};
-	MARGINS g_contentMargins{}, g_sizingMargins{};
 
-	struct CWindowState : Util::ComRefCounted<CWindowState>
-	{
-		uDWM::CVisual* sourceVisual{};
-		bool active{};
-		bool maximized{};
-		LONG windowRectLeft{};
-	};
-	using CWindowStatePtr = winrt::com_ptr<CWindowState>;
-	std::unordered_map<uDWM::CVisual*, CWindowStatePtr> g_textVisualStateMap{};
+	CaptionText::WindowStateMap g_textVisualStateMap{};
 
-	CWindowStatePtr GetOrCreateWindowState(uDWM::CVisual* visual)
-	{
-		auto& state = g_textVisualStateMap[visual];
-		if (!state)
-		{
-			state = Util::make_com_ptr<CWindowState>();
-			state->sourceVisual = visual;
-		}
-
-		return state;
-	}
-
-	const CWindowState& GetWindowState(uDWM::CVisual* visual)
-	{
-		static const CWindowState defaultState{};
-		const auto it = g_textVisualStateMap.find(visual);
-		return it == g_textVisualStateMap.end() || !it->second ? defaultState : *it->second;
-	}
-
-	void ShareWindowState(uDWM::CVisual* source, uDWM::CVisual* clone)
-	{
-		if (source && clone)
-		{
-			// The source remains authoritative; preview containers must not replace its active state.
-			g_textVisualStateMap[clone] = GetOrCreateWindowState(source);
-		}
-	}
 	winrt::com_ptr<ID2D1DCRenderTarget> g_textGlowRT{};
 	winrt::com_ptr<ID2D1Bitmap1> g_textGlowD2DBitmap{};
 	winrt::com_ptr<ID2D1Effect> g_textGlowEffect{};
 	winrt::com_ptr<ID2D1Effect> g_textMorphologyEffect{};
 
-	COLORREF g_textGlowColor{};
 
-	int g_textGlowSize{};
-	int g_textGlowIntensity{};
+	CaptionText::TextGlowParameters g_textGlowParameters{};
 	int g_centerCaption{ 0 };
-	int CaptionCenterOffset(double visualWidth, double textWidth, double visualX, double parentWidth, double scale)
-	{
-		const int localOffset = std::max(
-			static_cast<int>((visualWidth - textWidth) / 2.0),
-			0
-		);
-		if (g_centerCaption <= 0 || g_isTrimmed)
-			return 0;
 
-		if (g_centerCaption == 1)
-			return localOffset;
-
-		// Win8 centers against the parent visual and uses a small scale-adjusted
-		// guard band before falling back to the local visual width.
-		int parentOffset = static_cast<int>((parentWidth - textWidth) / 2.0) - static_cast<int>(visualX);
-		if (static_cast<double>(parentOffset + static_cast<int>(textWidth)) + scale * 5.0 > visualWidth)
-			parentOffset = localOffset;
-
-		return std::max(parentOffset, 0);
-	}
-
-	void CalculateRealizedTextGlowParams(int textGlowMode);
 }
 
 void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
@@ -179,25 +121,16 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 		solidColorBrush->SetColor(color);
 	});
 
-	const auto& windowState = GetWindowState(g_dwriteTextVisual);
+	const auto& windowState = CaptionText::GetWindowState(g_textVisualStateMap, g_dwriteTextVisual);
 	const auto textColorOverride = windowState.active ? (windowState.maximized ? g_captionActiveColorMaximized : g_captionActiveColor) : (windowState.maximized ? g_captionInactiveColorMaximized : g_captionInactiveColor);
 	if (textColorOverride != 0xFFFFFFFF)
 	{
 		solidColorBrush->SetColor(Color::FromAbgr(textColorOverride));
 	}
 
-	DWRITE_LINE_METRICS lineMetrics{};
-	UINT32 lineCount{};
-	THROW_IF_FAILED(
-		textLayout->GetLineMetrics(
-			&lineMetrics,
-			1,
-			&lineCount
-		)
-	);
-	g_isTrimmed = lineMetrics.isTrimmed;
+	g_isTrimmed = CaptionText::IsDWriteTextTrimmed(textLayout);
 
-	if (!g_textGlowSize)
+	if (!g_textGlowParameters.size)
 	{
 		return g_ID2D1DeviceContext_DrawTextLayout_Org(
 			This,
@@ -208,8 +141,8 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 		);
 	}
 
-	origin.x += g_textGlowSize;
-	origin.y += g_textGlowSize;
+	origin.x += g_textGlowParameters.size;
+	origin.y += g_textGlowParameters.size;
 
 	DWRITE_TEXT_METRICS metrics{};
 	THROW_IF_FAILED(
@@ -229,14 +162,19 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 		);
 	}
 
-	if (LOWORD(Shared::g_textGlowMode) == 3 && g_textGlowIntensity)
+	if (LOWORD(Shared::g_textGlowMode) == 3 && g_textGlowParameters.intensity)
 	{
+		DWRITE_OVERHANG_METRICS overhangs{};
+		THROW_IF_FAILED(textLayout->GetOverhangMetrics(&overhangs));
+		const auto textBounds = CaptionText::CalculateDWriteBitmapBounds(metrics, overhangs);
+		const D2D1_POINT_2F bitmapOrigin{ origin.x + textBounds.left, origin.y + textBounds.top };
+
 		winrt::com_ptr<ID2D1BitmapRenderTarget> bitmapRT{};
 		THROW_IF_FAILED(
 			This->CreateCompatibleRenderTarget(
 				D2D1::SizeF(
-					std::ceil(metrics.left + metrics.width) + static_cast<float>(g_textGlowSize * 2),
-					std::ceil(metrics.top + metrics.height) + static_cast<float>(g_textGlowSize * 2)
+					textBounds.right - textBounds.left,
+					textBounds.bottom - textBounds.top
 				),
 				bitmapRT.put()
 			)
@@ -246,7 +184,7 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 		bitmapRT->BeginDraw();
 		bitmapRT->Clear();
 		bitmapRT->DrawTextLayout(
-			D2D1::Point2F(),
+			D2D1::Point2F(-textBounds.left, -textBounds.top),
 			textLayout,
 			defaultFillBrush,
 			options
@@ -270,19 +208,19 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 					D2D1_MORPHOLOGY_MODE_DILATE
 				)
 			);
-			THROW_IF_FAILED(
-				g_textMorphologyEffect->SetValue(
-					D2D1_MORPHOLOGY_PROP_WIDTH,
-					3 + g_textGlowSize / 12
-				)
-			);
-			THROW_IF_FAILED(
-				g_textMorphologyEffect->SetValue(
-					D2D1_MORPHOLOGY_PROP_HEIGHT,
-					3 + g_textGlowSize / 12
-				)
-			);
 		}
+		THROW_IF_FAILED(
+			g_textMorphologyEffect->SetValue(
+				D2D1_MORPHOLOGY_PROP_WIDTH,
+				3 + g_textGlowParameters.size / 12
+			)
+		);
+		THROW_IF_FAILED(
+			g_textMorphologyEffect->SetValue(
+				D2D1_MORPHOLOGY_PROP_HEIGHT,
+				3 + g_textGlowParameters.size / 12
+			)
+		);
 		if (!g_textGlowEffect)
 		{
 			THROW_IF_FAILED(
@@ -302,7 +240,7 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 		THROW_IF_FAILED(
 			g_textGlowEffect->SetValue(
 				D2D1_SHADOW_PROP_COLOR,
-				Color::FromAbgr(g_textGlowColor | (std::min(g_textGlowIntensity, 255) << 24), false)
+				Color::FromAbgr(g_textGlowParameters.color | (std::min(g_textGlowParameters.intensity, 255) << 24), false)
 			)
 		);
 		THROW_IF_FAILED(
@@ -310,22 +248,23 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 				D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION,
 				std::max(
 					0.f,
-					(static_cast<float>(g_textGlowSize)) / 3.f + 0.5f
+					(static_cast<float>(g_textGlowParameters.size)) / 3.f + 0.5f
 				)
 			)
 		);
 		g_textMorphologyEffect->SetInput(0, bitmap.get());
 
+		// With no source rectangle, DrawImage preserves the effect's negative bounds.
 		This->DrawImage(
 			g_textGlowEffect.get(),
-			&origin,
+			&bitmapOrigin,
 			nullptr,
 			D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
 			D2D1_COMPOSITE_MODE_SOURCE_COPY
 		);
 		This->DrawImage(
 			bitmap.get(),
-			&origin,
+			&bitmapOrigin,
 			nullptr,
 			D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR
 		);
@@ -370,10 +309,10 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 		};
 		D2D1_RECT_F glowRect
 		{
-			textBoundingBox.left - static_cast<float>(g_contentMargins.cxLeftWidth),
-			textBoundingBox.top - static_cast<float>(g_contentMargins.cyTopHeight),
-			textBoundingBox.right + static_cast<float>(g_contentMargins.cxRightWidth),
-			textBoundingBox.bottom + static_cast<float>(g_contentMargins.cyBottomHeight)
+			textBoundingBox.left - static_cast<float>(g_textGlowParameters.contentMargins.cxLeftWidth),
+			textBoundingBox.top - static_cast<float>(g_textGlowParameters.contentMargins.cyTopHeight),
+			textBoundingBox.right + static_cast<float>(g_textGlowParameters.contentMargins.cxRightWidth),
+			textBoundingBox.bottom + static_cast<float>(g_textGlowParameters.contentMargins.cyBottomHeight)
 		};
 
 		const auto calcGlowClipRect = [&windowState](const D2D1_RECT_F& textRect, D2D1_RECT_F& glowClipRect, bool mirrored)
@@ -382,7 +321,7 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 			offset += windowState.windowRectLeft;
 			offset -= g_dwriteTextVisual->GetX();
 			// DWrite glow clipping needs the same offset calculation as the text surface.
-			offset -= CaptionCenterOffset(
+			offset -= CaptionText::CenterOffset(g_centerCaption, g_isTrimmed,
 				static_cast<double>(g_dwriteTextVisual->GetWidth()),
 				static_cast<double>(g_textSizeF.Width),
 				static_cast<double>(g_dwriteTextVisual->GetX()),
@@ -406,14 +345,20 @@ void CaptionTextHandler::MyID2D1DeviceContext_DrawTextLayout(
 				);
 			}
 		};
-		calcGlowClipRect(textBoundingBox, glowRect, g_dwriteTextVisual->IsRTLMirrored());
+		auto glowClipRect = glowRect;
+		calcGlowClipRect(textBoundingBox, glowClipRect, g_dwriteTextVisual->IsRTLMirrored());
+		This->PushAxisAlignedClip(glowClipRect, D2D1_ANTIALIAS_MODE_ALIASED);
+		const auto clipScope = wil::scope_exit([&]
+		{
+			This->PopAxisAlignedClip();
+		});
 
 		THROW_IF_FAILED(
 			Util::DrawNineGridBitmap(
 				This,
 				g_textGlowD2DBitmap.get(),
 				glowRect,
-				g_sizingMargins,
+				g_textGlowParameters.sizingMargins,
 				Shared::g_textGlowMode == 2 ? (windowState.active ? (windowState.maximized ? Shared::g_glowOpacityMaximized : Shared::g_glowOpacity) : (windowState.maximized ? Shared::g_glowOpacityInactiveMaximized : Shared::g_glowOpacityInactive)) : 1.f
 			)
 		);
@@ -449,8 +394,8 @@ HRESULT CaptionTextHandler::MyICompositionGraphicsDevice_CreateDrawingSurface(
 	if (g_dwriteTextVisual)
 	{
 		g_textSizeF = sizePixels;
-		sizePixels.Width += g_textGlowSize * 2;
-		sizePixels.Height += g_textGlowSize * 2;
+		sizePixels.Width += g_textGlowParameters.size * 2;
+		sizePixels.Height += g_textGlowParameters.size * 2;
 	}
 	return g_ICompositionGraphicsDevice_CreateDrawingSurface_Org(
 		This,
@@ -468,8 +413,8 @@ HRESULT CaptionTextHandler::MyICompositionSurfaceBrush2_put_Offset(
 {
 	if (g_dwriteTextVisual)
 	{
-		value.Y -= g_textGlowSize;
-		value.X -= g_textGlowSize;
+		value.Y -= g_textGlowParameters.size;
+		value.X -= g_textGlowParameters.size;
 
 		// offset, glowSize
 		// 40, 17
@@ -477,22 +422,22 @@ HRESULT CaptionTextHandler::MyICompositionSurfaceBrush2_put_Offset(
 		// CDWriteVisual is rtl mirrored, but CSpriteVisual is not rtl mirrored
 		if (const auto& offset = g_dwriteTextVisual->GetOffset(); g_dwriteTextVisual->IsRTLMirrored())
 		{
-			if (offset.x > g_textGlowSize)
+			if (offset.x > g_textGlowParameters.size)
 			{
-				value.X += g_textGlowSize;
+				value.X += g_textGlowParameters.size;
 			}
 			else
 			{
-				value.X += g_textGlowSize + g_textGlowSize - offset.x;
+				value.X += g_textGlowParameters.size + g_textGlowParameters.size - offset.x;
 			}
 		}
 		else
 		{
-			value.X += offset.x - std::max(offset.x - g_textGlowSize, 0l);
+			value.X += offset.x - std::max(offset.x - g_textGlowParameters.size, 0l);
 		}
 
 		// Apply the same CenterCaption offset to the DWrite composition surface.
-		const float offset = static_cast<float>(CaptionCenterOffset(
+		const float offset = static_cast<float>(CaptionText::CenterOffset(g_centerCaption, g_isTrimmed,
 			static_cast<double>(g_dwriteTextVisual->GetWidth()),
 			static_cast<double>(g_textSizeF.Width),
 			static_cast<double>(g_dwriteTextVisual->GetX()),
@@ -540,11 +485,12 @@ HRESULT CaptionTextHandler::MyCDWriteText_ValidateVisual(uDWM::CDWriteText* This
 	}
 	if (g_window = uDWM::TryGetWindowFromVisual(This); g_window && g_window->GetData())
 	{
-		const auto windowState = GetOrCreateWindowState(This);
+		const auto windowState = CaptionText::GetOrCreateWindowState(g_textVisualStateMap, This);
 		if (windowState->sourceVisual == This)
 		{
-			windowState->active = g_window->TreatAsActiveWindow();
-			windowState->maximized = g_window->TreatAsMaximized();
+			const auto status = GlassKernel::GetWindowStatus(g_window);
+			windowState->active = status.test(0);
+			windowState->maximized = status.test(1);
 
 			RECT windowRect{};
 			g_window->GetActualWindowRect(&windowRect, true, false, true);
@@ -561,7 +507,7 @@ HRESULT CaptionTextHandler::MyCDWriteText_ValidateVisual(uDWM::CDWriteText* This
 
 HRESULT CaptionTextHandler::MyCDWriteText_UpdateOffset(uDWM::CDWriteText* This)
 {
-	if (!g_textGlowSize)
+	if (!g_textGlowParameters.size)
 	{
 		return g_CDWriteText_UpdateOffset_Org(This);
 	}
@@ -575,7 +521,7 @@ HRESULT CaptionTextHandler::MyCDWriteText_UpdateOffset(uDWM::CDWriteText* This)
 	const auto actualOffsetX = offset.x;
 	if (!This->IsRTLMirrored())
 	{
-		offset.x = std::max(offset.x - g_textGlowSize, 0l);
+		offset.x = std::max(offset.x - g_textGlowParameters.size, 0l);
 	}
 	const auto hr = g_CDWriteText_UpdateOffset_Org(This);
 	offset.x = actualOffsetX;
@@ -585,7 +531,7 @@ HRESULT CaptionTextHandler::MyCDWriteText_UpdateOffset(uDWM::CDWriteText* This)
 
 HRESULT CaptionTextHandler::MyCDWriteText_SendSetSize(uDWM::CDWriteText* This, const SIZE* size)
 {
-	if (!g_textGlowSize)
+	if (!g_textGlowParameters.size)
 	{
 		return g_CDWriteText_SendSetSize_Org(This, size);
 	}
@@ -597,14 +543,14 @@ HRESULT CaptionTextHandler::MyCDWriteText_SendSetSize(uDWM::CDWriteText* This, c
 	if (This->IsRTLMirrored())
 	{
 		This->GetVisualProxy()->SetSize(
-			static_cast<double>(size->cx + offset.x - std::max(offset.x - g_textGlowSize, 0l)),
+			static_cast<double>(size->cx + offset.x - std::max(offset.x - g_textGlowParameters.size, 0l)),
 			static_cast<double>(size->cy)
 		);
 	}
 	else
 	{
 		This->GetVisualProxy()->SetSize(
-			static_cast<double>(size->cx + offset.x - std::max(offset.x - g_textGlowSize, 0l) + g_textGlowSize),
+			static_cast<double>(size->cx + offset.x - std::max(offset.x - g_textGlowParameters.size, 0l) + g_textGlowParameters.size),
 			static_cast<double>(size->cy)
 		);
 	}
@@ -614,7 +560,7 @@ HRESULT CaptionTextHandler::MyCDWriteText_SendSetSize(uDWM::CDWriteText* This, c
 
 HRESULT CaptionTextHandler::MyCDWriteText_InitializeVisualTreeClone(uDWM::CDWriteText* This, uDWM::CDWriteText* clonedVisual, UINT cloneOption)
 {
-	ShareWindowState(This, clonedVisual);
+	CaptionText::ShareWindowState(g_textVisualStateMap, This, clonedVisual);
 	const auto result = g_CDWriteText_InitializeVisualTreeClone_Org(This, clonedVisual, cloneOption);
 	if (FAILED(result))
 	{
@@ -627,60 +573,6 @@ HRESULT CaptionTextHandler::MyCDWriteText_scalar_deleting_destructor(uDWM::CDWri
 {
 	g_textVisualStateMap.erase(This);
 	return g_CDWriteText_scalar_deleting_destructor_Org(This, flag);
-}
-
-void CaptionTextHandler::CalculateRealizedTextGlowParams(int textGlowMode)
-{
-	if (textGlowMode == 0)
-	{
-		g_textGlowSize = 0;
-	}
-	else if (textGlowMode == 1 || textGlowMode == 2)
-	{
-		const auto themeHandle = CustomThemeAtlasLoader::GetThemeHandle();
-
-		CustomThemeAtlasLoader::MyGetThemeMargins(
-			themeHandle,
-			nullptr,
-			static_cast<int>(DWM_WINDOW_THEME_PART::TEXTGLOW),
-			0,
-			TMT_SIZINGMARGINS,
-			nullptr,
-			&g_sizingMargins
-		);
-		CustomThemeAtlasLoader::MyGetThemeMargins(
-			themeHandle,
-			nullptr,
-			static_cast<int>(DWM_WINDOW_THEME_PART::TEXTGLOW),
-			0,
-			TMT_CONTENTMARGINS,
-			nullptr,
-			&g_contentMargins
-		);
-		g_textGlowSize = std::max(
-			{
-				g_contentMargins.cxLeftWidth,
-				g_contentMargins.cxRightWidth,
-				g_contentMargins.cyTopHeight,
-				g_contentMargins.cyBottomHeight
-			}
-		);
-	}
-	else
-	{
-		wil::unique_htheme themeHandle{ OpenThemeData(nullptr, L"CompositedWindow::Window") };
-
-		if (g_textGlowSize = HIWORD(textGlowMode); !g_textGlowSize)
-		{
-			CustomThemeAtlasLoader::MyGetThemeInt(themeHandle.get(), static_cast<int>(DWM_WINDOW_THEME_PART::COMMON), 0, TMT_TEXTGLOWSIZE, &g_textGlowSize);
-		}
-		CustomThemeAtlasLoader::MyGetThemeInt(themeHandle.get(), static_cast<int>(DWM_WINDOW_THEME_PART::COMMON), 0, TMT_GLOWINTENSITY, &g_textGlowIntensity);
-		GetThemeColor(themeHandle.get(), static_cast<int>(DWM_WINDOW_THEME_PART::COMMON), 0, TMT_GLOWCOLOR, &g_textGlowColor);
-
-		// debug
-		//g_textGlowIntensity = 305;
-		//g_textGlowColor = 0xFFFFFF;
-	}
 }
 
 void CaptionTextHandler::DestroyDeviceResources()
@@ -701,7 +593,7 @@ void CaptionTextHandler::Update(GlassEngine::UpdateType type)
 	if (type & GlassEngine::UpdateType::Theme)
 	{
 		g_textGlowD2DBitmap = nullptr;
-		CalculateRealizedTextGlowParams(Shared::g_textGlowMode);
+		CaptionText::CalculateRealizedTextGlowParams(Shared::g_textGlowMode, g_textGlowParameters);
 	}
 	if (type & GlassEngine::UpdateType::Backdrop || type & GlassEngine::UpdateType::Theme)
 	{

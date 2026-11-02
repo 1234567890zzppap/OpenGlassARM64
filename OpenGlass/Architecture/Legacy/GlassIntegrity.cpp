@@ -1,10 +1,10 @@
 #include "pch.h"
-#include "StartupTrace.hpp"
 #include "HookHelper.hpp"
 #include "uDwmProjection.hpp"
 #include "dwmcoreProjection.hpp"
 #include "Shared.hpp"
 #include "GlassKernel.hpp"
+#include "GlassInfra.hpp"
 #include "GlassIntegrity.hpp"
 #include "GlassSafetyZoneLayer.hpp"
 #include "GlassCoverageSet.hpp"
@@ -14,6 +14,23 @@ using namespace OpenGlass;
 
 namespace OpenGlass::GlassIntegrity
 {
+#if !defined(_M_ARM64)
+	HRESULT MyCOverlayContext_CheckAndRecordOverlayCandidate(
+		dwmcore::COverlayContext* This,
+		dwmcore::CVisual* visual,
+		const D2D1_RECT_F& worldBounds,
+		dwmcore::CCompositionSurfaceInfo* surface,
+		dwmcore::ISwapChainRealization* realization,
+		const D2D1_RECT_F& sourceRect,
+		const D2D1_RECT_F& destinationRect,
+		const D2D1_RECT_F& clipRect,
+		const dwmcore::CCornerRects& cornerRects,
+		const dwmcore::CMILMatrix& matrix,
+		DXGI_MODE_ROTATION rotation,
+		UINT flags,
+		bool unknown
+	);
+#endif
 	HRESULT MyCOcclusionContext_CheckAndRecordOverlayCandidate(
 		dwmcore::COcclusionContext* This,
 		dwmcore::CVisual* visual,
@@ -22,12 +39,14 @@ namespace OpenGlass::GlassIntegrity
 		const dwmcore::CShape* shape,
 		int flags
 	);
+#if !defined(_M_ARM64)
 	bool MyCOcclusionContext_NodeIntersectsOcclusionRegion(
 		dwmcore::COcclusionContext* This,
 		const dwmcore::CVisual* visual,
 		dwmcore::COcclusionInfo* occlusionInfo,
 		float* area
 	);
+#endif
 	HRESULT MyCOcclusionContext_CheckAndRecordOverlayCandidate(
 		dwmcore::COcclusionContext* This,
 		dwmcore::CVisual* visual,
@@ -109,12 +128,15 @@ namespace OpenGlass::GlassIntegrity
 		int depth,
 		bool unknown
 	);
+#if !defined(_M_ARM64)
 	bool MyCArrayBasedCoverageSet_IsCovered_26100_Pre_4484(
 		dwmcore::CArrayBasedCoverageSet* This,
 		const D2D1_RECT_F& coverage,
 		int depth,
 		bool unknown
 	);
+#endif
+#if !defined(_M_ARM64)
 	bool MyCArrayBasedCoverageSet_IsCovered_26100(
 		dwmcore::CArrayBasedCoverageSet* This,
 		const D2D1_RECT_F& coverage,
@@ -122,6 +144,7 @@ namespace OpenGlass::GlassIntegrity
 		bool unknown1,
 		bool unknown2
 	);
+#endif
 	template <typename Callback>
 	bool MyCOcclusionContext_IsOccluded(
 		dwmcore::COcclusionContext* This,
@@ -193,6 +216,7 @@ namespace OpenGlass::GlassIntegrity
 		const DWM::span<const dwmcore::CVisual*>& visuals,
 		const dwmcore::COcclusionContext* occlusionContext
 	);
+#if !defined(_M_ARM64)
 	D2D1_RECT_F* MyCDirtyRegion_GetOptimizedRect_26100_Pre_1000(
 		dwmcore::CDirtyRegion* This,
 		D2D1_RECT_F* dirtyRect,
@@ -204,6 +228,8 @@ namespace OpenGlass::GlassIntegrity
 		bool useSuperSample,
 		const DWM::span<const dwmcore::CVisual*>& visuals
 	);
+#endif
+#if !defined(_M_ARM64)
 	D2D1_RECT_F* MyCTreeDirty_GetOptimizedRect(
 		dwmcore::CTreeDirty* This,
 		D2D1_RECT_F* dirtyRect,
@@ -215,6 +241,7 @@ namespace OpenGlass::GlassIntegrity
 		bool useSuperSample,
 		const DWM::span<const dwmcore::CVisual*>& visuals
 	);
+#endif
 
 	template <typename T>
 	HRESULT MyCDrawingContext_DrawVisualTree(
@@ -270,14 +297,21 @@ namespace OpenGlass::GlassIntegrity
 		dwmcore::CVisual* visualOverride
 	);
 
+#if !defined(_M_ARM64)
+	Projection::Detour<dwmcore::Symbol_COverlayContext_CheckAndRecordOverlayCandidate_26100_8328, &MyCOverlayContext_CheckAndRecordOverlayCandidate> g_COverlayContext_CheckAndRecordOverlayCandidate_Org{};
+#endif
 	Projection::Detour<dwmcore::Symbol_COcclusionContext_CheckAndRecordOverlayCandidate_Pre_19041, static_cast<dwmcore::COcclusionContext_CheckAndRecordOverlayCandidate_Pre_19041_t>(&MyCOcclusionContext_CheckAndRecordOverlayCandidate)> g_COcclusionContext_CheckAndRecordOverlayCandidate_Pre_19041_Org{};
 	Projection::Detour<dwmcore::Symbol_COcclusionContext_CheckAndRecordOverlayCandidate_19041, static_cast<dwmcore::COcclusionContext_CheckAndRecordOverlayCandidate_19041_t>(&MyCOcclusionContext_CheckAndRecordOverlayCandidate)> g_COcclusionContext_CheckAndRecordOverlayCandidate_19041_Org{};
+#if !defined(_M_ARM64)
 	Projection::Detour<dwmcore::Symbol_COcclusionContext_CheckAndRecordOverlayCandidate_26100, static_cast<dwmcore::COcclusionContext_CheckAndRecordOverlayCandidate_26100_t>(&MyCOcclusionContext_CheckAndRecordOverlayCandidate)> g_COcclusionContext_CheckAndRecordOverlayCandidate_26100_Org{};
 	Projection::Detour<dwmcore::Symbol_COcclusionContext_NodeIntersectsOcclusionRegion_26100_3624, &MyCOcclusionContext_NodeIntersectsOcclusionRegion> g_COcclusionContext_NodeIntersectsOcclusionRegion_Org{};
+#endif
 	Projection::Detour<dwmcore::Symbol_COcclusionContext_CollectRectangleForOcclusion_Pre_20348, static_cast<dwmcore::COcclusionContext_CollectRectangleForOcclusion_Pre_20348_t>(&MyCOcclusionContext_CollectRectangleForOcclusion)> g_COcclusionContext_CollectRectangleForOcclusion_Pre_20348_Org{};
 	Projection::Detour<dwmcore::Symbol_COcclusionContext_CollectRectangleForOcclusion_20348, static_cast<dwmcore::COcclusionContext_CollectRectangleForOcclusion_20348_t>(&MyCOcclusionContext_CollectRectangleForOcclusion)> g_COcclusionContext_CollectRectangleForOcclusion_20348_Org{};
+#if !defined(_M_ARM64)
 	Projection::Detour<dwmcore::Symbol_COcclusionContext_CollectRectangleForOcclusion_26100_Pre_7840, static_cast<dwmcore::COcclusionContext_CollectRectangleForOcclusion_26100_Pre_7840_t>(&MyCOcclusionContext_CollectRectangleForOcclusion)> g_COcclusionContext_CollectRectangleForOcclusion_26100_Pre_7840_Org{};
 	Projection::Detour<dwmcore::Symbol_COcclusionContext_CollectRectangleForOcclusion_26100_7840, static_cast<dwmcore::COcclusionContext_CollectRectangleForOcclusion_26100_7840_t>(&MyCOcclusionContext_CollectRectangleForOcclusion)> g_COcclusionContext_CollectRectangleForOcclusion_26100_7840_Org{};
+#endif
 
 	Projection::Detour<dwmcore::Symbol_COcclusionContext_Compute_Pre_19041, &MyCOcclusionContext_Compute_Pre_W10_2004> g_COcclusionContext_Compute_Pre_W10_2004_Org{};
 	Projection::Detour<dwmcore::Symbol_COcclusionContext_Compute_19041, &MyCOcclusionContext_Compute> g_COcclusionContext_Compute_Org{};
@@ -288,8 +322,10 @@ namespace OpenGlass::GlassIntegrity
 	Projection::Detour<dwmcore::Symbol_COcclusionContext__COcclusionContext, &MyCOcclusionContext_Destructor> g_COcclusionContext_Destructor_Org{};
 
 	Projection::Detour<dwmcore::Symbol_CArrayBasedCoverageSet_IsCovered_Pre_26100, &MyCArrayBasedCoverageSet_IsCovered_Pre_26100> g_CArrayBasedCoverageSet_IsCovered_Pre_26100_Org{};
+#if !defined(_M_ARM64)
 	Projection::Detour<dwmcore::Symbol_CArrayBasedCoverageSet_IsCovered_26100_Pre_4484, &MyCArrayBasedCoverageSet_IsCovered_26100_Pre_4484> g_CArrayBasedCoverageSet_IsCovered_26100_Pre_4484_Org{};
 	Projection::Detour<dwmcore::Symbol_CArrayBasedCoverageSet_IsCovered_26100, &MyCArrayBasedCoverageSet_IsCovered_26100> g_CArrayBasedCoverageSet_IsCovered_26100_Org{};
+#endif
 	Projection::Detour<dwmcore::Symbol_COcclusionContext_IsOccluded_Pre_22000, &MyCOcclusionContext_IsOccluded_Pre_22000> g_COcclusionContext_IsOccluded_Pre_22000_Org{};
 	Projection::Detour<dwmcore::Symbol_COcclusionContext_IsOccluded, &MyCOcclusionContext_IsOccluded_20348> g_COcclusionContext_IsOccluded_Org{};
 	Projection::Detour<dwmcore::Symbol_COcclusionContext_PageInPixelsRectToDeviceRect, &MyCOcclusionContext_PageInPixelsRectToDeviceRect> g_COcclusionContext_PageInPixelsRectToDeviceRect_Org{};
@@ -299,8 +335,10 @@ namespace OpenGlass::GlassIntegrity
 	Projection::Detour<dwmcore::Symbol_CDirtyRegion_GetUnOccludedDirtyRect, &MyCDirtyRegion_GetUnOccludedDirtyRect> g_CDirtyRegion_GetUnOccludedDirtyRect_Org{};
 	Projection::Detour<dwmcore::Symbol_CDirtyRegion_GetOptimizedRect_Server_2022, &MyCDirtyRegion_GetOptimizedRect_WS2022> g_CDirtyRegion_GetOptimizedRect_WS2022_Org{};
 	Projection::Detour<dwmcore::Symbol_CDirtyRegion_GetOptimizedRect, &MyCDirtyRegion_GetOptimizedRect> g_CDirtyRegion_GetOptimizedRect_Org{};
+#if !defined(_M_ARM64)
 	Projection::Detour<dwmcore::Symbol_CDirtyRegion_GetOptimizedRect_26100_Pre_1000, &MyCDirtyRegion_GetOptimizedRect_26100_Pre_1000> g_CDirtyRegion_GetOptimizedRect_26100_Pre_1000_Org{};
 	Projection::Detour<dwmcore::Symbol_CTreeDirty_GetOptimizedRect, &MyCTreeDirty_GetOptimizedRect> g_CTreeDirty_GetOptimizedRect_Org{};
+#endif
 
 	Projection::Detour<dwmcore::Symbol_CDrawingContext_DrawVisualTree_17763, &MyCDrawingContext_DrawVisualTree_Win10_1809> g_CDrawingContext_DrawVisualTree_Win10_1809_Org{};
 	Projection::Detour<dwmcore::Symbol_CDrawingContext_DrawVisualTree_18362, &MyCDrawingContext_DrawVisualTree_Win10_1903> g_CDrawingContext_DrawVisualTree_Win10_1903_Org{};
@@ -310,9 +348,12 @@ namespace OpenGlass::GlassIntegrity
 	bool HasCArrayBasedCoverageSetIsCovered() noexcept
 	{
 		return
-			static_cast<bool>(g_CArrayBasedCoverageSet_IsCovered_Pre_26100_Org) ||
-			static_cast<bool>(g_CArrayBasedCoverageSet_IsCovered_26100_Pre_4484_Org) ||
-			static_cast<bool>(g_CArrayBasedCoverageSet_IsCovered_26100_Org);
+			static_cast<bool>(g_CArrayBasedCoverageSet_IsCovered_Pre_26100_Org)
+#if !defined(_M_ARM64)
+			|| static_cast<bool>(g_CArrayBasedCoverageSet_IsCovered_26100_Pre_4484_Org)
+			|| static_cast<bool>(g_CArrayBasedCoverageSet_IsCovered_26100_Org)
+#endif
+			;
 	}
 
 	Util::ObjectPool<dwmcore::CD2DContext*, CGlassSafetyZoneLayer> g_safetyZonePool{};
@@ -327,6 +368,8 @@ namespace OpenGlass::GlassIntegrity
 		int depth{ -1 };
 	};
 	CCollectedOcclusionRectangle g_lastCollectedOcclusionRectangle{};
+	// Candidate registration is synchronous within Compute, under the DWM lock.
+	dwmcore::COcclusionContext* g_overlayOcclusionContext{};
 
 	enum class GlassSafetyZoneMode : UCHAR
 	{
@@ -430,6 +473,7 @@ namespace OpenGlass::GlassIntegrity
 	uint8_t* g_COcclusionContext_IsDeviceTransformAssigned_PatchLocation = nullptr;
 	HookHelper::InstructionPatch g_COcclusionContext_IsDeviceTransformAssigned_Patch;
 
+#if !defined(_M_ARM64)
 	uint16_t g_COcclusionContext_MinimumOcclusionAreaBranch_Instructions[] =
 	{
 		// comiss xmmN, dword ptr [rsi + 47Ch]
@@ -454,12 +498,6 @@ namespace OpenGlass::GlassIntegrity
 	};
 	uint8_t* g_COcclusionContext_MinimumOcclusionAreaBranch_PatchLocation = nullptr;
 	HookHelper::InstructionPatch g_COcclusionContext_MinimumOcclusionAreaBranch_Patch;
-	// Temporary: the first frames of a session are enough to see which branch the frame
-	// geometry takes and what the realized colors look like.
-	int g_arm64DrawGeometryTraceBudget = 64;
-#if defined(_M_ARM64)
-	// The AArch64 shortcut is a single conditional branch, so it needs its own patch object.
-	HookHelper::InstructionPatch g_arm64MinimumOcclusionAreaBranchPatch;
 #endif
 
 	void CaptureCollectedOcclusionRectangle(
@@ -675,6 +713,7 @@ void GlassIntegrity::MyCOcclusionContext_CollectRectangleForOcclusion(
 	g_COcclusionContext_CollectRectangleForOcclusion_20348_Org(This, rectangle, unknown1, unknown2, outRect);
 }
 
+#if !defined(_M_ARM64)
 void GlassIntegrity::MyCOcclusionContext_CollectRectangleForOcclusion(
 	dwmcore::COcclusionContext* This,
 	const D2D1_RECT_F& rectangle,
@@ -684,7 +723,9 @@ void GlassIntegrity::MyCOcclusionContext_CollectRectangleForOcclusion(
 	CaptureCollectedOcclusionRectangle(This, &rectangle);
 	g_COcclusionContext_CollectRectangleForOcclusion_26100_Pre_7840_Org(This, rectangle, outRect);
 }
+#endif
 
+#if !defined(_M_ARM64)
 void GlassIntegrity::MyCOcclusionContext_CollectRectangleForOcclusion(
 	dwmcore::COcclusionContext* This,
 	const D2D1_RECT_F& rectangle,
@@ -695,6 +736,43 @@ void GlassIntegrity::MyCOcclusionContext_CollectRectangleForOcclusion(
 	CaptureCollectedOcclusionRectangle(This, &rectangle);
 	g_COcclusionContext_CollectRectangleForOcclusion_26100_7840_Org(This, rectangle, unknown, outRect);
 }
+#endif
+
+#if !defined(_M_ARM64)
+HRESULT GlassIntegrity::MyCOverlayContext_CheckAndRecordOverlayCandidate(
+	dwmcore::COverlayContext* This,
+	dwmcore::CVisual* visual,
+	const D2D1_RECT_F& worldBounds,
+	dwmcore::CCompositionSurfaceInfo* surface,
+	dwmcore::ISwapChainRealization* realization,
+	const D2D1_RECT_F& sourceRect,
+	const D2D1_RECT_F& destinationRect,
+	const D2D1_RECT_F& clipRect,
+	const dwmcore::CCornerRects& cornerRects,
+	const dwmcore::CMILMatrix& matrix,
+	DXGI_MODE_ROTATION rotation,
+	UINT flags,
+	bool unknown
+)
+{
+	// Window and bitmap collection inline the older COcclusionContext entry points.
+	// This common sink supplies the native per-monitor, clipped world bounds.
+	if (GlassKernel::GetBlurExpansion())
+	{
+		const auto context = g_overlayOcclusionContext;
+		const auto deviceBounds = context->PageInPixelsRectToDeviceRect(worldBounds);
+		const auto coverage = CArrayBasedGlassCoverageSet::GetOrCreate(context->GetArrayBasedCoverageSet());
+		if (coverage && coverage->IsPartiallyCovered(deviceBounds, static_cast<int>(context->GetCurrentZ())))
+		{
+			return S_OK;
+		}
+	}
+	return g_COverlayContext_CheckAndRecordOverlayCandidate_Org(
+		This, visual, worldBounds, surface, realization, sourceRect, destinationRect,
+		clipRect, cornerRects, matrix, rotation, flags, unknown
+	);
+}
+#endif
 
 HRESULT GlassIntegrity::MyCOcclusionContext_CheckAndRecordOverlayCandidate(
 	dwmcore::COcclusionContext* This,
@@ -728,6 +806,7 @@ HRESULT GlassIntegrity::MyCOcclusionContext_CheckAndRecordOverlayCandidate(
 	return g_COcclusionContext_CheckAndRecordOverlayCandidate_19041_Org(This, visual, surface, matrix, shape, flags);
 }
 
+#if !defined(_M_ARM64)
 HRESULT GlassIntegrity::MyCOcclusionContext_CheckAndRecordOverlayCandidate(
 	dwmcore::COcclusionContext* This,
 	dwmcore::CVisual* visual,
@@ -743,7 +822,9 @@ HRESULT GlassIntegrity::MyCOcclusionContext_CheckAndRecordOverlayCandidate(
 	}
 	return g_COcclusionContext_CheckAndRecordOverlayCandidate_26100_Org(This, visual, surface, matrix, shape, flags);
 }
+#endif
 
+#if !defined(_M_ARM64)
 bool GlassIntegrity::MyCOcclusionContext_NodeIntersectsOcclusionRegion(
 	dwmcore::COcclusionContext* This,
 	const dwmcore::CVisual* visual,
@@ -766,6 +847,7 @@ bool GlassIntegrity::MyCOcclusionContext_NodeIntersectsOcclusionRegion(
 	}
 	return intersects;
 }
+#endif
 
 HRESULT GlassIntegrity::MyCOcclusionContext_Compute_Pre_W10_2004(
 	dwmcore::COcclusionContext* This,
@@ -849,6 +931,8 @@ HRESULT GlassIntegrity::MyCOcclusionContext_Compute(
 )
 {
 	CheckEmergencyRecoveryHotkey();
+	const auto previousContext = std::exchange(g_overlayOcclusionContext, This);
+	const auto restoreContext = wil::scope_exit([&] { g_overlayOcclusionContext = previousContext; });
 
 	HRESULT hr{ S_OK };
 	if (!g_COcclusionContext_DrawGeometry_Org)
@@ -937,16 +1021,13 @@ HRESULT GlassIntegrity::MyCOcclusionContext_DrawGeometry(
 	const auto solidColorBrush = static_cast<dwmcore::CSolidColorLegacyMilBrush*>(brush);
 	auto color = solidColorBrush->GetRealizedColor();
 	const auto expansion = GlassKernel::GetBlurExpansion();
-	const auto reinterpreter = GlassKernel::AlphaChannelReinterpreter(color.a);
+	const auto reinterpreter = GlassInfra::AlphaChannelReinterpreter(color.a);
 	const auto valid = reinterpreter.GetIsValid();
 	const auto active = reinterpreter.GetIsActive();
 	const auto maximized = reinterpreter.GetIsMaximized();
 
-	GlassKernel::CRealizedGlassColorizationParameters realizedGlassColorizationParameters{};
-	const auto marker = color.a;
-	const char* branch = "none";
-
 	if (
+		GlassKernel::CRealizedGlassColorizationParameters realizedGlassColorizationParameters;
 		!valid ||
 		(
 			valid &&
@@ -969,7 +1050,6 @@ HRESULT GlassIntegrity::MyCOcclusionContext_DrawGeometry(
 		)
 	)
 	{
-		branch = "solid";
 		UINT count{};
 		if (!geometryShape->IsRectangles(&count))
 		{
@@ -997,7 +1077,6 @@ HRESULT GlassIntegrity::MyCOcclusionContext_DrawGeometry(
 		expansion
 	)
 	{
-		branch = "glass";
 		const auto occlusionContext = This->GetOcclusionContext();
 		if (const auto glassCoverageSet = CArrayBasedGlassCoverageSet::GetOrCreate(occlusionContext->GetArrayBasedCoverageSet(), true); glassCoverageSet)
 		{
@@ -1015,21 +1094,6 @@ HRESULT GlassIntegrity::MyCOcclusionContext_DrawGeometry(
 				);
 			}
 		}
-	}
-
-	if (g_arm64DrawGeometryTraceBudget)
-	{
-		--g_arm64DrawGeometryTraceBudget;
-		StartupTrace::Write(
-			"integrity: draw-geometry valid=%d active=%d maximized=%d expansion=%.3f marker=%#010x realizedAlpha=%.3f branch=%s",
-			valid ? 1 : 0,
-			active ? 1 : 0,
-			maximized ? 1 : 0,
-			expansion,
-			*reinterpret_cast<const DWORD*>(&marker),
-			realizedGlassColorizationParameters.color.a,
-			branch
-		);
 	}
 
 	return hr;
@@ -1146,6 +1210,7 @@ bool GlassIntegrity::MyCArrayBasedCoverageSet_IsCovered_Pre_26100(
 	);
 }
 
+#if !defined(_M_ARM64)
 bool GlassIntegrity::MyCArrayBasedCoverageSet_IsCovered_26100_Pre_4484(
 	dwmcore::CArrayBasedCoverageSet* This,
 	const D2D1_RECT_F& coverage,
@@ -1168,7 +1233,9 @@ bool GlassIntegrity::MyCArrayBasedCoverageSet_IsCovered_26100_Pre_4484(
 		}
 	);
 }
+#endif
 
+#if !defined(_M_ARM64)
 bool GlassIntegrity::MyCArrayBasedCoverageSet_IsCovered_26100(
 	dwmcore::CArrayBasedCoverageSet* This,
 	const D2D1_RECT_F& coverage,
@@ -1193,6 +1260,7 @@ bool GlassIntegrity::MyCArrayBasedCoverageSet_IsCovered_26100(
 		}
 	);
 }
+#endif
 
 template <typename Callback>
 bool GlassIntegrity::MyCOcclusionContext_IsOccluded(
@@ -1486,6 +1554,7 @@ D2D1_RECT_F* GlassIntegrity::MyCDirtyRegion_GetOptimizedRect(
 		occlusionContext
 	);
 }
+#if !defined(_M_ARM64)
 D2D1_RECT_F* GlassIntegrity::MyCDirtyRegion_GetOptimizedRect_26100_Pre_1000(
 	dwmcore::CDirtyRegion* This,
 	D2D1_RECT_F* dirtyRect,
@@ -1516,6 +1585,8 @@ D2D1_RECT_F* GlassIntegrity::MyCDirtyRegion_GetOptimizedRect_26100_Pre_1000(
 		visuals
 	);
 }
+#endif
+#if !defined(_M_ARM64)
 D2D1_RECT_F* GlassIntegrity::MyCTreeDirty_GetOptimizedRect(
 	dwmcore::CTreeDirty* This,
 	D2D1_RECT_F* dirtyRect,
@@ -1546,6 +1617,7 @@ D2D1_RECT_F* GlassIntegrity::MyCTreeDirty_GetOptimizedRect(
 		visuals
 	);
 }
+#endif
 
 template <typename T>
 HRESULT GlassIntegrity::MyCDrawingContext_DrawVisualTree(
@@ -1840,15 +1912,24 @@ void GlassIntegrity::Startup()
 	const auto build_before_w10_2004 = dwmcore::g_versionInfo.build < os::build_w10_2004;
 	const auto build_before_w10_1903 = dwmcore::g_versionInfo.build < os::build_w10_1903;
 	const auto hasArrayBasedCoverageSetIsCovered = HasCArrayBasedCoverageSetIsCovered();
+#if !defined(_M_ARM64)
 	const auto hasArrayBasedCoverageSetIsCovered26100_Pre_4484 = static_cast<bool>(dwmcore::Symbol_CArrayBasedCoverageSet_IsCovered_26100_Pre_4484);
 	const auto hasArrayBasedCoverageSetIsCovered26100 = static_cast<bool>(dwmcore::Symbol_CArrayBasedCoverageSet_IsCovered_26100);
+#endif
 	const auto hasPageInPixelsRectToDeviceRect = static_cast<bool>(dwmcore::Symbol_COcclusionContext_PageInPixelsRectToDeviceRect);
+#if !defined(_M_ARM64)
+	const auto hasOverlayCandidateRegistration = static_cast<bool>(dwmcore::Symbol_COverlayContext_CheckAndRecordOverlayCandidate_26100_8328);
 	const auto hasCollectRectangleForOcclusion26100_Pre_7840 = static_cast<bool>(dwmcore::Symbol_COcclusionContext_CollectRectangleForOcclusion_26100_Pre_7840);
 	const auto hasCollectRectangleForOcclusion26100_7840 = static_cast<bool>(dwmcore::Symbol_COcclusionContext_CollectRectangleForOcclusion_26100_7840);
 	const auto hasCDirtyRegionGetOptimizedRect26100_Pre_1000 = static_cast<bool>(dwmcore::Symbol_CDirtyRegion_GetOptimizedRect_26100_Pre_1000);
 	const auto hasCTreeDirtyGetOptimizedRect = static_cast<bool>(dwmcore::Symbol_CTreeDirty_GetOptimizedRect);
+#endif
+#if !defined(_M_ARM64)
 	const auto hasInlinedMinimumOcclusionAreaBranch = static_cast<bool>(dwmcore::Symbol_COcclusionContext_PreSubgraph_26100_Pre_3624);
+#endif
+#if !defined(_M_ARM64)
 	const auto hasNodeIntersectsOcclusionRegion = static_cast<bool>(dwmcore::Symbol_COcclusionContext_NodeIntersectsOcclusionRegion_26100_3624);
+#endif
 
 	if (build_before_w10_2004 && !build_before_w10_1903)
 	{
@@ -1875,66 +1956,9 @@ void GlassIntegrity::Startup()
 		);
 		HookHelper::GetCurrentHookTransaction().Apply(g_COcclusionContext_IsDeviceTransformAssigned_Patch);
 	}
+#if !defined(_M_ARM64)
 	if (hasInlinedMinimumOcclusionAreaBranch)
 	{
-#if defined(_M_ARM64)
-		// AArch64 form of the decision the x64 table below neutralises. The 26100 ARM64 dwmcore
-		// compares the minimum occlusion area stored at COcclusionContext+0x47C with the collected
-		// area and, when a second condition also holds, jumps straight to the early-return path.
-		// That is what leaves the frames of overlapping and extended-frame windows undrawn. The
-		// x64 patch nops the comparison's conditional jump; here the equivalent is the CBZ right
-		// after the "do not skip" flag, so the collection always continues.
-		//   ldr  s16,[x21,#0x47C]     ; threshold
-		//   fcpe s20,s16              ; collected area against it
-		//   b.lt <second term>        ; area below the threshold
-		//   mov  w8,#1                ; not skipped
-		//   cbz  w8,<early return>    ; <- patched to nop
-		const auto preSubgraph = reinterpret_cast<const uint8_t*>(
-			dwmcore::Symbol_COcclusionContext_PreSubgraph_26100_Pre_3624.get()
-		);
-		constexpr size_t searchLength = 0x2000;
-		constexpr uint32_t thresholdLoad = 0xBD447EB0u;    // ldr  s16,[x21,#0x47C]
-		constexpr uint32_t thresholdCompare = 0x1E302290u; // fcpe s20,s16
-		constexpr uint32_t notSkippedFlag = 0x52800028u;   // mov  w8,#1
-		uint8_t* branchAddress = nullptr;
-		size_t matches = 0;
-		for (size_t offset = 0; offset + 5 * sizeof(uint32_t) <= searchLength; offset += sizeof(uint32_t))
-		{
-			uint32_t words[5]{};
-			memcpy(words, preSubgraph + offset, sizeof(words));
-			if (words[0] != thresholdLoad || words[1] != thresholdCompare || words[3] != notSkippedFlag)
-			{
-				continue;
-			}
-			// b.lt is the condition code 0xB; the taken target moves with the build.
-			if ((words[2] & 0xFF000010u) != 0x54000000u || (words[2] & 0xFu) != 0xBu)
-			{
-				continue;
-			}
-			// cbz w8,<early return>: 32-bit compare-and-branch on W8.
-			if ((words[4] & 0x7F000000u) != 0x34000000u || (words[4] & 0x1Fu) != 8u)
-			{
-				continue;
-			}
-			branchAddress = const_cast<uint8_t*>(preSubgraph + offset + 4 * sizeof(uint32_t));
-			matches++;
-		}
-		if (matches == 1 && branchAddress)
-		{
-			static constexpr std::array<uint8_t, 4> nopBranch{ 0x1F, 0x20, 0x03, 0xD5 };
-			std::array<uint8_t, 4> originalBranch{};
-			memcpy(originalBranch.data(), branchAddress, originalBranch.size());
-			StartupTrace::Write("integrity: neutralising the minimum occlusion-area shortcut at %p", branchAddress);
-			g_arm64MinimumOcclusionAreaBranchPatch.Prepare(branchAddress, originalBranch, nopBranch);
-			HookHelper::GetCurrentHookTransaction().Apply(g_arm64MinimumOcclusionAreaBranchPatch);
-		}
-		else
-		{
-			// The shortcut stays in place, which costs frame rendering on overlapping windows but
-			// keeps the process alive; the log records why.
-			StartupTrace::Write("integrity: minimum occlusion-area shortcut matched %zu site(s), leaving it in place", matches);
-		}
-#else
 		const auto preSubgraph = reinterpret_cast<const uint8_t*>(
 			dwmcore::Symbol_COcclusionContext_PreSubgraph_26100_Pre_3624.get()
 		);
@@ -1964,20 +1988,29 @@ void GlassIntegrity::Startup()
 			g_COcclusionContext_MinimumOcclusionAreaBranch_PatchedInstructions
 		);
 		HookHelper::GetCurrentHookTransaction().Apply(g_COcclusionContext_MinimumOcclusionAreaBranch_Patch);
-#endif
 	}
+#endif
 
 	HookHelper::ApplyInlineHooks(
 		std::initializer_list<HookHelper::DetourInfo>
 		{
 			{ &g_COcclusionContext_CheckAndRecordOverlayCandidate_Pre_19041_Org, build_before_w10_2004 },
 			{ &g_COcclusionContext_CheckAndRecordOverlayCandidate_19041_Org, !build_before_w10_2004 && build_before_w11_24h2 },
-			{ &g_COcclusionContext_CheckAndRecordOverlayCandidate_26100_Org, !build_before_w11_24h2 },
+#if !defined(_M_ARM64)
+			{ &g_COcclusionContext_CheckAndRecordOverlayCandidate_26100_Org, !build_before_w11_24h2 && !hasOverlayCandidateRegistration },
+#endif
+#if !defined(_M_ARM64)
+			{ &g_COverlayContext_CheckAndRecordOverlayCandidate_Org, hasOverlayCandidateRegistration },
+#endif
+#if !defined(_M_ARM64)
 			{ &g_COcclusionContext_NodeIntersectsOcclusionRegion_Org, hasNodeIntersectsOcclusionRegion },
+#endif
 			{ &g_COcclusionContext_CollectRectangleForOcclusion_Pre_20348_Org, build_before_server_2022 },
 			{ &g_COcclusionContext_CollectRectangleForOcclusion_20348_Org, !build_before_server_2022 && build_before_w11_24h2 },
+#if !defined(_M_ARM64)
 			{ &g_COcclusionContext_CollectRectangleForOcclusion_26100_Pre_7840_Org, hasCollectRectangleForOcclusion26100_Pre_7840 },
 			{ &g_COcclusionContext_CollectRectangleForOcclusion_26100_7840_Org, hasCollectRectangleForOcclusion26100_7840 },
+#endif
 
 			{ &g_COcclusionContext_Compute_Pre_W10_2004_Org, build_before_w10_2004 },
 			{ &g_COcclusionContext_Compute_Org, !build_before_w10_2004 },
@@ -1989,14 +2022,18 @@ void GlassIntegrity::Startup()
 			{ &g_CDirtyRegion_GetUnOccludedDirtyRect_Org, build_before_server_2022 && !build_before_w10_2004 },
 			{ &g_CDirtyRegion_GetOptimizedRect_WS2022_Org, build_before_w11_21h2 && !build_before_server_2022 },
 			{ &g_CDirtyRegion_GetOptimizedRect_Org, build_before_w11_24h2 && !build_before_w11_21h2 },
+#if !defined(_M_ARM64)
 			{ &g_CDirtyRegion_GetOptimizedRect_26100_Pre_1000_Org, hasCDirtyRegionGetOptimizedRect26100_Pre_1000 },
 			{ &g_CTreeDirty_GetOptimizedRect_Org, hasCTreeDirtyGetOptimizedRect },
+#endif
 
 			{ &g_COcclusionContext_IsOccluded_Pre_22000_Org, !hasArrayBasedCoverageSetIsCovered && build_before_server_2022 },
 			{ &g_COcclusionContext_IsOccluded_Org, !hasArrayBasedCoverageSetIsCovered && !build_before_server_2022 },
 			{ &g_CArrayBasedCoverageSet_IsCovered_Pre_26100_Org, hasArrayBasedCoverageSetIsCovered && build_before_w11_24h2 },
+#if !defined(_M_ARM64)
 			{ &g_CArrayBasedCoverageSet_IsCovered_26100_Pre_4484_Org, hasArrayBasedCoverageSetIsCovered26100_Pre_4484 },
 			{ &g_CArrayBasedCoverageSet_IsCovered_26100_Org, hasArrayBasedCoverageSetIsCovered26100 },
+#endif
 			{ &g_COcclusionContext_PageInPixelsRectToDeviceRect_Org, hasPageInPixelsRectToDeviceRect && hasArrayBasedCoverageSetIsCovered },
 
 			{ &g_CDrawingContext_DrawVisualTree_Win10_1809_Org, build_before_w10_1903 },
@@ -2009,10 +2046,12 @@ void GlassIntegrity::Startup()
 
 void GlassIntegrity::Shutdown()
 {
+#if !defined(_M_ARM64)
 	if (g_COcclusionContext_MinimumOcclusionAreaBranch_PatchLocation)
 	{
 		HookHelper::GetCurrentHookTransaction().Apply(g_COcclusionContext_MinimumOcclusionAreaBranch_Patch);
 	}
+#endif
 	if (g_COcclusionContext_IsDeviceTransformAssigned_PatchLocation)
 	{
 		HookHelper::GetCurrentHookTransaction().Apply(g_COcclusionContext_IsDeviceTransformAssigned_Patch);
@@ -2024,25 +2063,41 @@ void GlassIntegrity::Shutdown()
 	const auto build_before_w10_2004 = dwmcore::g_versionInfo.build < os::build_w10_2004;
 	const auto build_before_w10_1903 = dwmcore::g_versionInfo.build < os::build_w10_1903;
 	const auto hasArrayBasedCoverageSetIsCovered = HasCArrayBasedCoverageSetIsCovered();
+#if !defined(_M_ARM64)
 	const auto hasArrayBasedCoverageSetIsCovered26100_Pre_4484 = static_cast<bool>(dwmcore::Symbol_CArrayBasedCoverageSet_IsCovered_26100_Pre_4484);
 	const auto hasArrayBasedCoverageSetIsCovered26100 = static_cast<bool>(dwmcore::Symbol_CArrayBasedCoverageSet_IsCovered_26100);
+#endif
 	const auto hasPageInPixelsRectToDeviceRect = static_cast<bool>(dwmcore::Symbol_COcclusionContext_PageInPixelsRectToDeviceRect);
+#if !defined(_M_ARM64)
+	const auto hasOverlayCandidateRegistration = static_cast<bool>(dwmcore::Symbol_COverlayContext_CheckAndRecordOverlayCandidate_26100_8328);
 	const auto hasCollectRectangleForOcclusion26100_Pre_7840 = static_cast<bool>(dwmcore::Symbol_COcclusionContext_CollectRectangleForOcclusion_26100_Pre_7840);
 	const auto hasCollectRectangleForOcclusion26100_7840 = static_cast<bool>(dwmcore::Symbol_COcclusionContext_CollectRectangleForOcclusion_26100_7840);
 	const auto hasCDirtyRegionGetOptimizedRect26100_Pre_1000 = static_cast<bool>(dwmcore::Symbol_CDirtyRegion_GetOptimizedRect_26100_Pre_1000);
 	const auto hasCTreeDirtyGetOptimizedRect = static_cast<bool>(dwmcore::Symbol_CTreeDirty_GetOptimizedRect);
+#endif
+#if !defined(_M_ARM64)
 	const auto hasNodeIntersectsOcclusionRegion = static_cast<bool>(dwmcore::Symbol_COcclusionContext_NodeIntersectsOcclusionRegion_26100_3624);
+#endif
 	HookHelper::ApplyInlineHooks(
 		std::initializer_list<HookHelper::DetourInfo>
 		{
 			{ &g_COcclusionContext_CheckAndRecordOverlayCandidate_Pre_19041_Org, build_before_w10_2004 },
 			{ &g_COcclusionContext_CheckAndRecordOverlayCandidate_19041_Org, !build_before_w10_2004 && build_before_w11_24h2 },
-			{ &g_COcclusionContext_CheckAndRecordOverlayCandidate_26100_Org, !build_before_w11_24h2 },
+#if !defined(_M_ARM64)
+			{ &g_COcclusionContext_CheckAndRecordOverlayCandidate_26100_Org, !build_before_w11_24h2 && !hasOverlayCandidateRegistration },
+#endif
+#if !defined(_M_ARM64)
+			{ &g_COverlayContext_CheckAndRecordOverlayCandidate_Org, hasOverlayCandidateRegistration },
+#endif
+#if !defined(_M_ARM64)
 			{ &g_COcclusionContext_NodeIntersectsOcclusionRegion_Org, hasNodeIntersectsOcclusionRegion },
+#endif
 			{ &g_COcclusionContext_CollectRectangleForOcclusion_Pre_20348_Org, build_before_server_2022 },
 			{ &g_COcclusionContext_CollectRectangleForOcclusion_20348_Org, !build_before_server_2022 && build_before_w11_24h2 },
+#if !defined(_M_ARM64)
 			{ &g_COcclusionContext_CollectRectangleForOcclusion_26100_Pre_7840_Org, hasCollectRectangleForOcclusion26100_Pre_7840 },
 			{ &g_COcclusionContext_CollectRectangleForOcclusion_26100_7840_Org, hasCollectRectangleForOcclusion26100_7840 },
+#endif
 
 			{ &g_COcclusionContext_Compute_Pre_W10_2004_Org, build_before_w10_2004 },
 			{ &g_COcclusionContext_Compute_Org, !build_before_w10_2004 },
@@ -2054,14 +2109,18 @@ void GlassIntegrity::Shutdown()
 			{ &g_CDirtyRegion_GetUnOccludedDirtyRect_Org, build_before_server_2022 && !build_before_w10_2004 },
 			{ &g_CDirtyRegion_GetOptimizedRect_WS2022_Org, build_before_w11_21h2 && !build_before_server_2022 },
 			{ &g_CDirtyRegion_GetOptimizedRect_Org, build_before_w11_24h2 && !build_before_w11_21h2 },
+#if !defined(_M_ARM64)
 			{ &g_CDirtyRegion_GetOptimizedRect_26100_Pre_1000_Org, hasCDirtyRegionGetOptimizedRect26100_Pre_1000 },
 			{ &g_CTreeDirty_GetOptimizedRect_Org, hasCTreeDirtyGetOptimizedRect },
+#endif
 
 			{ &g_COcclusionContext_IsOccluded_Pre_22000_Org, !hasArrayBasedCoverageSetIsCovered && build_before_server_2022 },
 			{ &g_COcclusionContext_IsOccluded_Org, !hasArrayBasedCoverageSetIsCovered && !build_before_server_2022 },
 			{ &g_CArrayBasedCoverageSet_IsCovered_Pre_26100_Org, hasArrayBasedCoverageSetIsCovered && build_before_w11_24h2 },
+#if !defined(_M_ARM64)
 			{ &g_CArrayBasedCoverageSet_IsCovered_26100_Pre_4484_Org, hasArrayBasedCoverageSetIsCovered26100_Pre_4484 },
 			{ &g_CArrayBasedCoverageSet_IsCovered_26100_Org, hasArrayBasedCoverageSetIsCovered26100 },
+#endif
 			{ &g_COcclusionContext_PageInPixelsRectToDeviceRect_Org, hasPageInPixelsRectToDeviceRect && hasArrayBasedCoverageSetIsCovered },
 
 			{ &g_CDrawingContext_DrawVisualTree_Win10_1809_Org, build_before_w10_1903 },
@@ -2080,7 +2139,9 @@ void GlassIntegrity::Shutdown()
 
 void GlassIntegrity::Cleanup()
 {
+#if !defined(_M_ARM64)
 	g_COcclusionContext_MinimumOcclusionAreaBranch_PatchLocation = nullptr;
+#endif
 	g_lastCollectedOcclusionRectangle = {};
 	CArrayBasedGlassCoverageSet::RemoveAll();
 	g_shrunkCoverageSetMap.clear();

@@ -42,7 +42,8 @@ namespace OpenGlass
 	{
 		if (!label || !label->GetParent()) return;
 		auto* parent = label->GetParent();
-		parent->Layout();
+		// The caller assigns widths once before wrapping its labels, then lays out
+		// the page once more to consume their new heights.
 		const int width = label->GetClientSize().x;
 		if (width <= 0) return;
 		// Reset the cached wrap width before replacing the source text.
@@ -56,6 +57,5 @@ namespace OpenGlass
 		label->SetMinSize(wxSize(0, label->GetBestSize().y));
 		for (auto* ancestor = parent; ancestor; ancestor = ancestor->GetParent())
 			ancestor->InvalidateBestSize();
-		parent->Layout();
 	}
 }

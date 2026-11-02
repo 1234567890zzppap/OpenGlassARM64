@@ -1,0 +1,40 @@
+{
+  "layouts": [
+    {
+      "name": "CRegionShape_RegionData",
+      "id": "CRegionShape.RegionData",
+      "kind": "field",
+      "type": "DWORD*",
+      "cases": [
+        {
+          "platform": null,
+          "ranges": [
+            {
+              "offset": 16,
+              "otherwise": true
+            }
+          ]
+        }
+      ],
+      "notes": "GetWindowClipShape points the FastRegion data pointer at the inline region header, BuildFromRects clears the DWORD reached through that pointer, and the destructor passes the same FastRegion subobject to FreeMemory. Verified at 17763.719 and 18362.329, and at 22621.7219 ARM64: CShape::CopyShape allocates the shape with mov x0,#0x60, takes the inline header with add x9,x23,#0x18 and stores it with str x9,[x23,#0x10]."
+    },
+    {
+      "name": "CRegionShape_InlineRegion",
+      "id": "CRegionShape.InlineRegion",
+      "kind": "field",
+      "type": "DWORD",
+      "cases": [
+        {
+          "platform": null,
+          "ranges": [
+            {
+              "offset": 24,
+              "otherwise": true
+            }
+          ]
+        }
+      ],
+      "notes": "GetWindowClipShape zero-initializes this inline header and points RegionData at it before BuildFromRects; CShape::CopyShape independently initializes the same header in a zeroed 96-byte allocation. Verified at 17763.719 and 18362.329, and at 22621.7219 ARM64: the add x9,x23,#0x18 operand CShape::CopyShape stores through RegionData is this header."
+    }
+  ]
+}

@@ -43,8 +43,8 @@ namespace OpenGlass
 		std::filesystem::path Path(Settings::Scope scope, Settings::Id id) const;
 		bool IsManaged(const std::filesystem::path& path) const;
 		bool NeedsImport(Settings::Scope scope, Settings::Id id, const std::filesystem::path& source) const;
-		std::shared_ptr<Preparation> Prepare(const PresetPackages::Package& package, Settings::Scope scope);
-		std::shared_ptr<Preparation> PrepareFile(Settings::Scope scope, Settings::Id id, const std::filesystem::path& source);
+		std::unique_ptr<Preparation> Prepare(const PresetPackages::Package& package, Settings::Scope scope);
+		std::unique_ptr<Preparation> PrepareFile(Settings::Scope scope, Settings::Id id, const std::filesystem::path& source);
 		void PreserveSource(PresetPackages::CreateRequest& request, const std::filesystem::path& source, const PresetPackages::Package* updateTarget = nullptr) const;
 		void Begin(std::optional<ColorPreference::Snapshot> color = {});
 		void TrackColor(const ColorPreference::Snapshot& color);

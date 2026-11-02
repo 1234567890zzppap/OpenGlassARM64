@@ -1,6 +1,9 @@
 #pragma once
 
-#include "pch.h"
+#include <Windows.h>
+#include <functional>
+#include <stop_token>
+#include <string>
 
 namespace OpenGlass
 {

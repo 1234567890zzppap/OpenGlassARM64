@@ -32,23 +32,16 @@ namespace OpenGlass::GlassFrameDemodernizer
 	{
 		// call ???
 		0xE8, 0x00, 0x00, 0x00, 0x00,
-		// mov     r15b, 1
-		0x41, 0xB7, 0x01,
-		// test al, al
-		0x84, 0xC0
 	};
+	// Preserve caller instructions between the call and its test of AL.
 	UCHAR g_callCDesktopManager_IsHighContrastMode_replacedInstruction[]
 	{
-		// mov     r15b, 1
-		0x41, 0xB7, 0x01,
+		// mov al, 1
+		0xB0, 0x01,
 		// nop
 		// nop
 		// nop
 		0x90, 0x90, 0x90,
-		// move al, 0x01
-		0xB0, 0x01,
-		// test al, al
-		0x84, 0xC0
 	};
 	UCHAR g_callCTopLevelWindow_IsShadowNCAreaPart_Instructions[]
 	{
@@ -94,7 +87,10 @@ HRESULT GlassFrameDemodernizer::MyCTopLevelWindow_ValidateVisual(uDWM::CTopLevel
 
 	g_systemBackdrop = old_systemBackdropType >= DWMSBT_MAINWINDOW;
 	systemBackdropType = DWMSBT_NONE;
-	if (g_systemBackdrop)
+	if (
+		g_systemBackdrop &&
+		extendedFrameMargins.cyTopHeight == 0
+	)
 	{
 		// known issue:
 		// set cyTopHeight to any non zero value will cause compatibility issue with Outlook (new)
